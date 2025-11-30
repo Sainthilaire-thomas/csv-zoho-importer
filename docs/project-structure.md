@@ -1,6 +1,6 @@
 ﻿# Structure du projet - csv-zoho-importer
 
-*Genere le 2025-11-28 11:01:35*
+*Genere le 2025-11-29 08:01:25*
 ```
 csv-zoho-importer/
 |-- .vscode/
@@ -22,36 +22,75 @@ csv-zoho-importer/
 |   |-- api/
 |   |   |-- csv/
 |   |   |   |-- import/
+|   |   |   |   +-- route.ts
 |   |   |   +-- validate/
+|   |   |       +-- route.ts
 |   |   |-- imports/
 |   |   |-- rules/
 |   |   +-- zoho/
 |   |       +-- tables/
+|   |           +-- route.ts
 |   |-- favicon.ico
 |   |-- globals.css
 |   |-- layout.tsx
 |   +-- page.tsx
 |-- components/
 |   |-- import/
-|   |   +-- wizard/
+|   |   |-- wizard/
+|   |   |   |-- import-wizard.tsx
+|   |   |   |-- index.ts
+|   |   |   |-- step-config.tsx
+|   |   |   |-- step-confirm.tsx
+|   |   |   |-- step-review.tsx
+|   |   |   |-- step-source.tsx
+|   |   |   |-- step-validate.tsx
+|   |   |   +-- wizard-progress.tsx
+|   |   |-- file-upload.tsx
+|   |   |-- table-selector.tsx
+|   |   +-- validation-results.tsx
 |   |-- layout/
 |   |   |-- header.tsx
 |   |   |-- sidebar.tsx
 |   |   +-- theme-toggle.tsx
 |   |-- rules/
 |   |-- ui/
+|   |   |-- alert.tsx
+|   |   |-- button.tsx
+|   |   |-- card.tsx
+|   |   +-- progress.tsx
 |   +-- theme-provider.tsx
 |-- config/
 |-- docs/
 |   |-- ai-context/
-|   |   +-- missions/
-|   +-- project-structure.md
+|   |   |-- missions/
+|   |   |   |-- mission-001-setup-initial.md
+|   |   |   |-- mission-002-wizard-import.md
+|   |   |   |-- mission-003-api-zoho.md
+|   |   |   +-- TEMPLATE-MISSION.md
+|   |   |-- architecture-cible.md
+|   |   |-- base-context.md
+|   |   +-- README.md
+|   |-- architecture-cible.md
+|   |-- doc-session.md
+|   |-- project-structure.md
+|   +-- specs-fonctionnelles.md
 |-- lib/
 |   |-- domain/
 |   |   |-- file-provider/
 |   |   +-- validation/
-|   |       +-- rules/
+|   |       |-- rules/
+|   |       |   |-- base.ts
+|   |       |   |-- date.ts
+|   |       |   |-- email.ts
+|   |       |   |-- index.ts
+|   |       |   |-- number.ts
+|   |       |   +-- required.ts
+|   |       |-- engine.ts
+|   |       +-- index.ts
 |   |-- hooks/
+|   |   |-- use-csv-parser.ts
+|   |   |-- use-import.ts
+|   |   +-- use-validation.ts
 |   |-- infrastructure/
 |   |   |-- supabase/
 |   |   |   |-- client.ts

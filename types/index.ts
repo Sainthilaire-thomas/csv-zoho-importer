@@ -12,7 +12,7 @@ export type ImportStatus =
   | 'success'
   | 'error';
 
-export type ImportMode = 'append' | 'replace';
+export type ImportMode = 'append' | 'truncateadd' | 'updateadd' | 'deleteupsert' | 'onlyadd';
 
 export type FileSource = 'upload' | 'sftp';
 

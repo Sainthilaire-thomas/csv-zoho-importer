@@ -1,7 +1,7 @@
 
 # CSV to Zoho Analytics Importer - Contexte de Base
 
-*Mis à jour le 2025-11-29*
+*Mis à jour le 2025-11-29 (Session 3)*
 
 ---
 
@@ -63,7 +63,8 @@ Application web permettant d'automatiser l'import de fichiers CSV/Excel dans Zoh
 │                          │                                      │
 │                          ▼                                      │
 │                   API LAYER (Route Handlers)                    │
-│      /zoho/oauth/*   /zoho/tables   /zoho/import   /csv/*      │
+│   /zoho/oauth/*  /zoho/workspaces  /zoho/tables  /zoho/folders │
+│   /zoho/import                                                  │
 └─────────────────────────────────────────────────────────────────┘
                               │
               ┌───────────────┼───────────────┐
@@ -80,9 +81,9 @@ Application web permettant d'automatiser l'import de fichiers CSV/Excel dans Zoh
 
 ## Authentification Zoho Analytics
 
-### Approche : OAuth2 flow complet dans l'app
+### Approche : OAuth2 flow complet dans l'app ✅ FONCTIONNEL
 
-Chaque utilisateur connecte son propre compte Zoho via l'interface. Les tokens sont stockés chiffrés dans Supabase.
+Chaque utilisateur connecte son propre compte Zoho via l'interface. Les tokens sont stockés chiffrés (AES-256-GCM) dans Supabase.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -100,11 +101,13 @@ Chaque utilisateur connecte son propre compte Zoho via l'interface. Les tokens s
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### Avantages
+### Points techniques importants
 
-* **Autonomie** : Pas de gestion manuelle des refresh tokens
-* **Multi-user** : Chaque user a ses propres accès Zoho
-* **Sécurité** : Tokens chiffrés, jamais exposés
+1. **Domaine API** : Toujours utiliser `analyticsapi.zoho.com` (pas `zohoapis.com`)
+2. **Variables serveur** : `APP_URL` nécessaire en plus de `NEXT_PUBLIC_APP_URL`
+3. **Cookies OAuth** : 2 cookies séparés (`zoho_oauth_state` et `zoho_oauth_region`)
+4. **UUID** : Utiliser `crypto.randomUUID()` (pas le package `uuid`)
+5. **Casse viewType** : Zoho renvoie 'Table'/'QueryTable', pas 'TABLE'/'QUERY_TABLE'
 
 ---
 
@@ -128,24 +131,27 @@ csv-zoho-importer/
 │   │   └── layout.tsx
 │   ├── api/
 │   │   ├── csv/
-│   │   │   ├── import/
-│   │   │   │   └── route.ts        # SIMULÉ - à connecter
-│   │   │   └── validate/
-│   │   │       └── route.ts
-│   │   ├── imports/
-│   │   ├── rules/
+│   │   │   ├── import/route.ts
+│   │   │   └── validate/route.ts
 │   │   └── zoho/
-│   │       └── tables/
-│   │           └── route.ts        # Retourne mock data - à connecter
+│   │       ├── oauth/
+│   │       │   ├── authorize/route.ts   ✅
+│   │       │   ├── callback/route.ts    ✅
+│   │       │   ├── status/route.ts      ✅
+│   │       │   └── disconnect/route.ts  ✅
+│   │       ├── workspaces/route.ts      ✅
+│   │       ├── tables/route.ts          ✅
+│   │       ├── folders/route.ts         ✅ NOUVEAU
+│   │       └── import/route.ts          ⏳ À TESTER
 │   ├── globals.css
 │   ├── layout.tsx
 │   └── page.tsx
 ├── components/
 │   ├── import/
 │   │   ├── wizard/
-│   │   │   ├── import-wizard.tsx
+│   │   │   ├── import-wizard.tsx        ✅ Modifié
 │   │   │   ├── index.ts
-│   │   │   ├── step-config.tsx
+│   │   │   ├── step-config.tsx          ✅ Modifié (accordéon)
 │   │   │   ├── step-confirm.tsx
 │   │   │   ├── step-review.tsx
 │   │   │   ├── step-source.tsx
@@ -153,12 +159,15 @@ csv-zoho-importer/
 │   │   │   └── wizard-progress.tsx
 │   │   ├── file-upload.tsx
 │   │   ├── table-selector.tsx
+│   │   ├── table-selector-accordion.tsx ✅ NOUVEAU
 │   │   └── validation-results.tsx
 │   ├── layout/
 │   │   ├── header.tsx
 │   │   ├── sidebar.tsx
 │   │   └── theme-toggle.tsx
-│   ├── rules/
+│   ├── zoho/
+│   │   ├── zoho-connect-button.tsx      ✅
+│   │   └── zoho-connection-status.tsx   ✅
 │   ├── ui/
 │   │   ├── alert.tsx
 │   │   ├── button.tsx
@@ -186,10 +195,15 @@ csv-zoho-importer/
 │   │   ├── supabase/
 │   │   │   ├── client.ts
 │   │   │   └── server.ts
-│   │   └── zoho/                   # VIDE - À CRÉER
+│   │   └── zoho/                        ✅
+│   │       ├── types.ts
+│   │       ├── encryption.ts
+│   │       ├── auth.ts
+│   │       ├── client.ts
+│   │       └── index.ts
 │   └── utils/
 ├── types/
-│   └── index.ts
+│   └── index.ts                         ✅ ZohoFolder ajouté
 ├── docs/
 │   └── ai-context/
 │       ├── missions/
@@ -224,11 +238,11 @@ export type ImportStatus =
   | 'error';
 
 export type ImportMode = 
-  | 'append'        // Ajouter à la fin
-  | 'truncateadd'   // Supprimer tout et ajouter
-  | 'updateadd'     // Mettre à jour ou ajouter
-  | 'deleteupsert'  // Synchroniser (supprimer absents)
-  | 'onlyadd';      // Ajouter uniquement les nouveaux
+  | 'append'        // APPEND - Ajouter à la fin
+  | 'truncateadd'   // TRUNCATEADD - Supprimer tout et ajouter
+  | 'updateadd'     // UPDATEADD - Mettre à jour ou ajouter
+  | 'deleteupsert'  // DELETEUPSERT - Synchroniser (supprimer absents)
+  | 'onlyadd';      // ONLYADD - Ajouter uniquement les nouveaux
 
 export type FileSource = 'upload' | 'sftp';
 
@@ -236,172 +250,117 @@ export interface ImportConfig {
   source: FileSource;
   file: File | null;
   sftpPath: string | null;
-  tableId: string;
-  tableName: string;
+  workspaceId: string;
+  workspaceName: string;
+  viewId: string;
+  viewName: string;
   importMode: ImportMode;
 }
 
-export interface ImportState {
-  status: ImportStatus;
-  config: ImportConfig;
-  validation: ValidationResult | null;
-  progress: ImportProgress | null;
-  result: ImportResult | null;
-  error: string | null;
-}
-
-// ==================== VALIDATION ====================
-
-export type RuleType =
-  | 'required'
-  | 'date'
-  | 'number'
-  | 'email'
-  | 'enum'
-  | 'regex'
-  | 'length'
-  | 'custom';
-
-export interface ValidationRule {
-  type: RuleType;
-  enabled: boolean;
-  params?: Record<string, unknown>;
-  message?: string;
-}
-
-export interface ValidationError {
-  line: number;
-  column: string;
-  value: string;
-  rule: RuleType;
-  message: string;
-}
-
-export interface ValidationResult {
-  isValid: boolean;
-  totalRows: number;
-  validRows: number;
-  errorRows: number;
-  errors: ValidationError[];
-  preview?: ParsedRow[];
-}
-
-// ==================== ZOHO (À COMPLÉTER) ====================
-
-export interface ZohoTable {
-  id: string;
-  name: string;
-  displayName: string;
-  workspaceId: string;
-  columns?: ZohoColumn[];
-}
-
-export interface ZohoColumn {
-  name: string;
-  displayName: string;
-  dataType: string;
-  isRequired: boolean;
-}
+// ==================== ZOHO ====================
 
 export interface ZohoWorkspace {
-  id: string;
-  name: string;
+  id: string;          // workspaceId
+  name: string;        // workspaceName
+  orgId?: string;
+}
+
+export interface ZohoView {
+  id: string;          // viewId
+  name: string;        // viewName
+  displayName: string;
+  workspaceId: string;
+  type?: string;       // 'Table' | 'QueryTable'
+  folderId?: string;   // ID du dossier parent
+}
+
+export interface ZohoFolder {
+  folderId: string;
+  folderName: string;
+  parentFolderId: string;  // '-1' pour dossiers racine
+  isDefault: boolean;
+}
+
+export interface ZohoTokens {
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: Date;
+  scope: string;
+  apiDomain: string;
 }
 ```
 
 ---
 
-## Hooks personnalisés
+## Base de données Supabase
 
-### useImport
+### Schéma dédié
 
-Gestion d'état du wizard d'import avec `useReducer`.
+Les tables sont dans le schéma **`csv_importer`** (pas le schéma `public`).
 
-```typescript
-const { 
-  state,           // ImportState
-  setFile,         // (file: File) => void
-  removeFile,      // () => void
-  setTable,        // (tableId: string, tableName: string) => void
-  setImportMode,   // (mode: ImportMode) => void
-  startValidation, // () => void
-  setValidationResult, // (result: ValidationResult) => void
-  goToStep,        // (status: ImportStatus) => void
-  goNext,          // () => void
-  goBack,          // () => void
-  reset,           // () => void
-  canGoNext,       // boolean
-  isImporting,     // boolean
-} = useImport();
+### Tables existantes
+
+```sql
+-- Tokens Zoho chiffrés par utilisateur ✅
+csv_importer.user_zoho_tokens (
+  id UUID PRIMARY KEY,
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE UNIQUE,
+  access_token_encrypted TEXT NOT NULL,
+  refresh_token_encrypted TEXT NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  scope TEXT,
+  api_domain TEXT,           -- Stocke analyticsapi.zoho.com
+  zoho_user_id TEXT,
+  zoho_email TEXT,
+  created_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ
+)
+
+-- Tables Zoho configurées
+csv_importer.zoho_tables (...)
+
+-- Règles de validation par table
+csv_importer.validation_rules (...)
+
+-- Logs des imports (métadonnées uniquement)
+csv_importer.import_logs (...)
 ```
 
-### useCsvParser
+### Permissions Supabase
 
-Parser pour fichiers CSV et Excel côté client.
-
-```typescript
-const { parseFile } = useCsvParser();
-// Retourne { data, headers, totalRows, fileName, fileType }
-const result = await parseFile(file);
-```
-
-### useValidation
-
-Validation côté client avec progression.
-
-```typescript
-const { validate, isValidating } = useValidation({
-  onProgress: (percentage) => console.log(`${percentage}%`)
-});
-const result = await validate(data, config);
+```sql
+GRANT USAGE ON SCHEMA csv_importer TO anon, authenticated;
+GRANT ALL ON csv_importer.user_zoho_tokens TO authenticated;
+GRANT ALL ON csv_importer.zoho_tables TO authenticated;
+GRANT ALL ON csv_importer.validation_rules TO authenticated;
+GRANT ALL ON csv_importer.import_logs TO authenticated;
 ```
 
 ---
 
-## Composants UI
+## Variables d'environnement
 
-### Button
+### .env.local actuel
 
-```tsx
-<Button 
-  variant="primary|secondary|outline|ghost|danger"
-  size="sm|md|lg"
-  isLoading={boolean}
-  leftIcon={<Icon />}
-  rightIcon={<Icon />}
-/>
-```
+```bash
+# Supabase
+NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
 
-### Card
+# Zoho OAuth2 App
+ZOHO_CLIENT_ID=1000.XTCYES...
+ZOHO_CLIENT_SECRET=xxx...
 
-```tsx
-<Card variant="default|bordered|elevated" padding="none|sm|md|lg">
-  <CardHeader>
-    <CardTitle>Titre</CardTitle>
-    <CardDescription>Description</CardDescription>
-  </CardHeader>
-  <CardContent>...</CardContent>
-  <CardFooter>...</CardFooter>
-</Card>
-```
+# Zoho API Domains (région US)
+ZOHO_API_DOMAIN=https://analyticsapi.zoho.com
+ZOHO_ACCOUNTS_DOMAIN=https://accounts.zoho.com
 
-### Alert
+# Chiffrement des tokens
+ENCRYPTION_KEY=your-32-bytes-secret-key-here
 
-```tsx
-<Alert 
-  variant="info|success|warning|error" 
-  title="Titre optionnel"
-  dismissible
-  onDismiss={() => {}}
->
-  Contenu
-</Alert>
-```
-
-### Progress
-
-```tsx
-<Progress value={50} max={100} size="sm|md|lg" showLabel animated />
+# URLs Application (LES DEUX SONT NÉCESSAIRES)
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+APP_URL=http://localhost:3000
 ```
 
 ---
@@ -416,157 +375,6 @@ const result = await validate(data, config);
 @import "tailwindcss";
 
 @variant dark (&:where(.dark, .dark *));
-```
-
-### tailwind.config.ts
-
-```typescript
-import type { Config } from "tailwindcss";
-
-const config: Config = {
-  darkMode: 'class',
-  content: [
-    "./pages/**/*.{js,ts,jsx,tsx,mdx}",
-    "./components/**/*.{js,ts,jsx,tsx,mdx}",
-    "./app/**/*.{js,ts,jsx,tsx,mdx}",
-  ],
-  theme: { extend: {} },
-  plugins: [],
-};
-
-export default config;
-```
-
----
-
-## Base de données Supabase
-
-### Schéma dédié
-
-Les tables sont dans le schéma **`csv_importer`** (pas le schéma `public`).
-
-### Tables existantes
-
-```sql
--- Tables Zoho configurées (mock data actuellement)
-csv_importer.zoho_tables (
-  id UUID PRIMARY KEY,
-  zoho_table_id TEXT UNIQUE,
-  name TEXT,
-  display_name TEXT,
-  workspace_id TEXT,
-  columns JSONB,
-  is_active BOOLEAN,
-  created_at TIMESTAMPTZ,
-  updated_at TIMESTAMPTZ
-)
-
--- Règles de validation par table
-csv_importer.validation_rules (
-  id UUID PRIMARY KEY,
-  zoho_table_id UUID REFERENCES zoho_tables(id),
-  column_name TEXT,
-  rules JSONB,
-  is_active BOOLEAN,
-  created_at TIMESTAMPTZ,
-  updated_at TIMESTAMPTZ
-)
-
--- Logs des imports (métadonnées uniquement)
-csv_importer.import_logs (
-  id UUID PRIMARY KEY,
-  user_id UUID REFERENCES auth.users(id),
-  zoho_table_id UUID,
-  file_name TEXT,
-  file_size_bytes INTEGER,
-  import_mode TEXT,
-  status TEXT,
-  rows_total INTEGER,
-  rows_imported INTEGER,
-  rows_errors INTEGER,
-  error_summary JSONB,
-  zoho_import_id TEXT,
-  duration_ms INTEGER,
-  created_at TIMESTAMPTZ
-)
-```
-
-### Table à créer (Mission 003)
-
-```sql
--- Tokens Zoho chiffrés par utilisateur
-csv_importer.user_zoho_tokens (
-  id UUID PRIMARY KEY,
-  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE UNIQUE,
-  access_token_encrypted TEXT NOT NULL,
-  refresh_token_encrypted TEXT NOT NULL,
-  expires_at TIMESTAMPTZ NOT NULL,
-  scope TEXT,
-  api_domain TEXT,
-  zoho_user_id TEXT,
-  zoho_email TEXT,
-  created_at TIMESTAMPTZ,
-  updated_at TIMESTAMPTZ
-)
-```
-
----
-
-## Variables d'environnement
-
-### Actuelles (.env.local)
-
-```bash
-# Supabase
-NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
-
-# Application
-NEXT_PUBLIC_APP_URL=http://localhost:3000
-```
-
-### À ajouter (Mission 003)
-
-```bash
-# Zoho OAuth2 App
-ZOHO_CLIENT_ID=1000.XXXXXXXXXXXX
-ZOHO_CLIENT_SECRET=XXXXXXXXXXXX
-
-# Zoho API Domains (US par défaut)
-ZOHO_API_DOMAIN=analyticsapi.zoho.com
-ZOHO_ACCOUNTS_DOMAIN=accounts.zoho.com
-
-# Chiffrement des tokens
-ENCRYPTION_KEY=your-32-bytes-secret-key-here
-```
-
----
-
-## Règles métier critiques
-
-### 1. Zero Data Retention
-
-```typescript
-// Les données CSV/Excel ne transitent JAMAIS par le serveur pour stockage
-// Traitement 100% côté client
-// Seules les métadonnées sont loggées
-```
-
-### 2. Validation avant import
-
-```typescript
-// L'import n'est JAMAIS exécuté si la validation échoue
-if (!validationResult.isValid) {
-  return { success: false, errors: validationResult.errors };
-}
-```
-
-### 3. Tokens chiffrés
-
-```typescript
-// Les tokens Zoho sont TOUJOURS chiffrés en base
-// Jamais de tokens en clair dans les logs
-// Déchiffrement uniquement au moment de l'utilisation
 ```
 
 ---
@@ -586,15 +394,24 @@ if (!validationResult.isValid) {
 * Support CSV et Excel (.xlsx, .xls)
 * Traitement côté client (fichiers jusqu'à 200 MB)
 
-### 🔄 En cours (Mission 003)
+### ✅ Complété (Mission 003 - Sessions 1-3)
 
-* **Intégration API Zoho Analytics**
-  * [ ] OAuth2 flow complet dans l'app
-  * [ ] Stockage tokens chiffrés
-  * [ ] Client Zoho (workspaces, tables, import)
-  * [ ] Routes API Zoho
-  * [ ] UI connexion Zoho
-  * [ ] Import réel vers Zoho
+* OAuth2 flow complet fonctionnel
+* Stockage tokens chiffrés (AES-256-GCM)
+* Liste des workspaces
+* Liste des tables (48 tables, filtrées Table/QueryTable)
+* Liste des dossiers (13 dossiers avec hiérarchie)
+* Composant accordéon pour sélection de tables
+* Recherche en temps réel sur les tables
+* UI connexion Zoho avec état visible
+
+### ⏳ En cours (Mission 003 - Prochaine étape)
+
+* **Test import réel vers Zoho Analytics**
+  * [ ] Tester route `/api/zoho/import`
+  * [ ] Valider les 5 modes d'import
+  * [ ] Tester avec fichier volumineux (57k lignes)
+  * [ ] Gérer les erreurs API Zoho
 
 ### 📋 À faire (Futures missions)
 
@@ -612,6 +429,10 @@ if (!validationResult.isValid) {
 cd "C:\Users\thoma\OneDrive\SONEAR_2025\csv-zoho-importer"
 npm run dev
 
+# Nettoyer cache et redémarrer
+Remove-Item -Recurse -Force .next
+npm run dev
+
 # Build
 npm run build
 
@@ -621,4 +442,44 @@ npm run build
 
 ---
 
+## Problèmes résolus (référence)
+
+### 1. Domaine API incorrect
+
+**Symptôme** : `Invalid URL /restapi/v2/workspaces`
+**Cause** : Zoho renvoie `zohoapis.com` par défaut au lieu de `analyticsapi.zoho.com`
+**Solution** : Fonction `convertToAnalyticsDomain()` dans `auth.ts`
+
+### 2. Variables env serveur
+
+**Symptôme** : `URL is malformed "undefined"`
+**Cause** : `NEXT_PUBLIC_*` pas disponibles côté serveur
+**Solution** : Ajouter `APP_URL` en plus de `NEXT_PUBLIC_APP_URL`
+
+### 3. Cookies OAuth invalides
+
+**Symptôme** : `invalid_state` au callback
+**Cause** : Incohérence entre 2 cookies vs 1 cookie JSON
+**Solution** : Utiliser 2 cookies séparés (`state` et `region`)
+
+### 4. Module uuid manquant
+
+**Symptôme** : `Cannot find module 'uuid'`
+**Solution** : Utiliser `crypto.randomUUID()` natif Node.js
+
+### 5. Casse viewType
+
+**Symptôme** : Aucune table retournée alors que 206 vues existent
+**Cause** : Zoho renvoie 'Table'/'QueryTable', code filtrait 'TABLE'/'QUERY_TABLE'
+**Solution** : Comparaison insensible à la casse ou correction du filtre
+
+### 6. Double lecture Response.json()
+
+**Symptôme** : `body stream already read`
+**Cause** : Appel à `.json()` deux fois sur la même Response
+**Solution** : Stocker le résultat dans une variable avant de l'utiliser
+
+---
+
 *Ce document doit être mis à jour lorsque les types fondamentaux ou l'architecture changent.*
+*Dernière mise à jour : 2025-11-29 13:15*

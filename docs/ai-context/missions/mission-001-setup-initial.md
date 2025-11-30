@@ -1,6 +1,7 @@
+
 # 🎯 Mission: Setup Initial du Projet
 
-*Session prévue : Semaine 1*
+*Session du 2025-11-28*
 
 ---
 
@@ -28,368 +29,150 @@ Mettre en place les fondations du projet "CSV to Zoho Analytics Importer" avec :
 
 ### Stack technique
 
-* Next.js 14 (App Router)
+* Next.js 15 (App Router) - *mis à jour depuis la spec initiale*
 * TypeScript 5.x (strict mode)
-* Tailwind CSS 3.x
+* Tailwind CSS 4.x - *mis à jour depuis la spec initiale*
 * Supabase (Auth + Database)
 * Vercel (Hosting)
 
 ---
 
-## Prérequis avant la session
+## Prérequis complétés
 
-### Comptes à créer
+### Comptes
 
-* [ ] Compte Supabase : https://supabase.com
-* [ ] Compte Vercel : https://vercel.com
-* [ ] Repository GitHub créé
+* [X] Compte Supabase (projet existant utilisé)
+* [X] Compte GitHub (repo créé)
+* [ ] Compte Vercel (à faire lors du déploiement)
 
-### Informations à collecter
+### Informations collectées
 
-* [ ] Supabase Project URL
-* [ ] Supabase Anon Key
-* [ ] Supabase Service Role Key
-
-### Zoho Analytics (peut être fait plus tard)
-
-* [ ] Client ID
-* [ ] Client Secret
-* [ ] Refresh Token
-* [ ] Workspace ID
-* [ ] Organization ID
+* [X] Supabase Project URL
+* [X] Supabase Anon Key
+* [ ] Credentials Zoho (à configurer plus tard)
 
 ---
 
-## Actions planifiées
+# 📋 BILAN DE SESSION
 
-### Étape 1 : Création du projet Next.js
+*Complété le 2025-11-28*
 
-```bash
-npx create-next-app@latest csv-zoho-importer --typescript --tailwind --eslint --app --src-dir=false --import-alias="@/*"
-```
-
-**Fichiers créés/modifiés :**
-
-* `package.json`
-* `tsconfig.json`
-* `tailwind.config.js`
-* `next.config.js`
-
-### Étape 2 : Installation des dépendances
-
-```bash
-# Dépendances principales
-npm install @supabase/supabase-js @supabase/auth-helpers-nextjs
-npm install @tanstack/react-query
-npm install papaparse zod
-npm install react-hook-form @hookform/resolvers
-npm install lucide-react sonner
-
-# Dev dependencies
-npm install -D @types/papaparse
-```
-
-### Étape 3 : Configuration TypeScript strict
-
-**Fichier : `tsconfig.json`**
-
-```json
-{
-  "compilerOptions": {
-    "strict": true,
-    "noUncheckedIndexedAccess": true,
-    "noImplicitReturns": true,
-    // ... reste de la config
-  }
-}
-```
-
-### Étape 4 : Création de la structure de dossiers
-
-```
-csv-zoho-importer/
-├── app/
-│   ├── (auth)/
-│   │   ├── login/
-│   │   │   └── page.tsx
-│   │   └── layout.tsx
-│   ├── (dashboard)/
-│   │   ├── import/
-│   │   │   └── page.tsx
-│   │   ├── history/
-│   │   │   └── page.tsx
-│   │   ├── settings/
-│   │   │   └── page.tsx
-│   │   └── layout.tsx
-│   ├── api/
-│   │   └── .gitkeep
-│   ├── layout.tsx
-│   └── page.tsx
-├── components/
-│   ├── ui/
-│   │   └── .gitkeep
-│   └── layout/
-│       ├── sidebar.tsx
-│       └── header.tsx
-├── lib/
-│   ├── domain/
-│   │   └── .gitkeep
-│   ├── infrastructure/
-│   │   └── supabase/
-│   │       ├── client.ts
-│   │       └── server.ts
-│   ├── hooks/
-│   │   └── .gitkeep
-│   └── utils/
-│       └── .gitkeep
-├── types/
-│   ├── import.ts
-│   ├── validation.ts
-│   ├── zoho.ts
-│   └── database.ts
-├── config/
-│   └── constants.ts
-└── docs/
-    └── ai-context/
-        ├── base-context.md
-        └── missions/
-```
-
-### Étape 5 : Types fondamentaux
-
-**Fichiers à créer :**
-
-* `types/import.ts`
-* `types/validation.ts`
-* `types/zoho.ts`
-* `types/database.ts`
-
-### Étape 6 : Configuration Supabase
-
-**Fichiers à créer :**
-
-* `lib/infrastructure/supabase/client.ts`
-* `lib/infrastructure/supabase/server.ts`
-* `.env.local` (avec variables)
-
-**Base de données Supabase :**
-
-* Créer les tables via SQL (voir architecture)
-* Configurer RLS
-
-### Étape 7 : Middleware d'authentification
-
-**Fichier : `middleware.ts`**
-
-```typescript
-// Protection des routes /import, /history, /settings
-```
-
-### Étape 8 : Layout et Navigation
-
-**Fichiers à créer :**
-
-* `app/(dashboard)/layout.tsx` - Layout avec sidebar
-* `components/layout/sidebar.tsx` - Navigation principale
-* `components/layout/header.tsx` - Header avec user info
-
-### Étape 9 : Page de Login
-
-**Fichier : `app/(auth)/login/page.tsx`**
-
-* Formulaire email/password
-* Intégration Supabase Auth
-* Redirection après login
-
-### Étape 10 : Pages placeholder
-
-**Fichiers à créer :**
-
-* `app/(dashboard)/import/page.tsx` - "Import - Coming soon"
-* `app/(dashboard)/history/page.tsx` - "History - Coming soon"
-* `app/(dashboard)/settings/page.tsx` - "Settings - Coming soon"
-
-### Étape 11 : Déploiement Vercel
-
-* [ ] Connecter repo GitHub à Vercel
-* [ ] Configurer variables d'environnement
-* [ ] Premier déploiement
-* [ ] Mettre à jour URLs dans Supabase
-
----
-
-## Critères de succès
-
-### Fonctionnel
-
-* [ ] `npm run dev` démarre sans erreur
-* [ ] `npm run build` compile sans erreur
-* [ ] Login/Logout fonctionne
-* [ ] Routes protégées redirigent vers login
-* [ ] Navigation entre pages fonctionne
-
-### Technique
-
-* [ ] TypeScript strict sans erreurs
-* [ ] Structure de dossiers conforme à l'architecture
-* [ ] Variables d'environnement configurées
-* [ ] Déploiement Vercel fonctionnel
-
-### Documentation
-
-* [ ] README.md à jour
-* [ ] .env.example créé
-* [ ] Fichiers de contexte IA sauvegardés
-
----
-
-## Code à produire
-
-### 1. Types fondamentaux
-
-```typescript
-// types/import.ts
-export type ImportStatus = 'idle' | 'selecting' | 'configuring' | 'validating' | 'reviewing' | 'importing' | 'success' | 'error';
-export type ImportMode = 'append' | 'replace';
-export type FileSource = 'upload' | 'sftp';
-// ... voir base-context.md pour les interfaces complètes
-```
-
-### 2. Client Supabase
-
-```typescript
-// lib/infrastructure/supabase/client.ts
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
-import type { Database } from '@/types/database';
-
-export const createClient = () => createClientComponentClient<Database>();
-```
-
-### 3. Middleware
-
-```typescript
-// middleware.ts
-import { createMiddlewareClient } from '@supabase/auth-helpers-nextjs';
-import { NextResponse } from 'next/server';
-import type { NextRequest } from 'next/server';
-
-export async function middleware(req: NextRequest) {
-  // ... protection des routes
-}
-
-export const config = {
-  matcher: ['/(dashboard)/:path*']
-};
-```
-
-### 4. Layout Dashboard
-
-```typescript
-// app/(dashboard)/layout.tsx
-import { Sidebar } from '@/components/layout/sidebar';
-import { Header } from '@/components/layout/header';
-
-export default function DashboardLayout({ children }) {
-  return (
-    <div className="flex h-screen">
-      <Sidebar />
-      <div className="flex-1 flex flex-col">
-        <Header />
-        <main className="flex-1 p-6 overflow-auto bg-gray-50">
-          {children}
-        </main>
-      </div>
-    </div>
-  );
-}
-```
-
----
-
-## Commandes utiles
-
-```bash
-# Développement
-npm run dev
-
-# Build de vérification
-npm run build
-
-# Lint
-npm run lint
-
-# Déploiement
-vercel
-
-# Supabase CLI (optionnel)
-npx supabase init
-npx supabase start
-```
-
----
-
-## Notes importantes
-
-### Sécurité
-
-* Ne JAMAIS commiter `.env.local`
-* Utiliser les variables d'environnement Vercel pour la prod
-* Service Role Key uniquement côté serveur
-
-### Conventions
-
-* Composants en PascalCase
-* Fichiers en kebab-case
-* Types/Interfaces avec préfixe I optionnel
-* Hooks avec préfixe `use`
-
-### À ne PAS faire dans cette session
-
-* ❌ Implémentation du wizard d'import
-* ❌ Connexion à Zoho Analytics
-* ❌ Moteur de validation
-* ❌ Composants UI avancés
-
----
-
-## Livrables attendus
-
-1. **Repository GitHub** avec le projet initialisé
-2. **Projet Supabase** avec tables créées
-3. **Déploiement Vercel** fonctionnel
-4. **Documentation** :
-   * README.md
-   * .env.example
-   * Ce fichier mission mis à jour avec le bilan
-
----
-
-## Template de bilan (à compléter en fin de session)
-
-```markdown
 ## ✅ Travail accompli
-- [x] Item 1
-- [x] Item 2
+
+* [X] Projet Next.js 15 créé avec TypeScript et Tailwind CSS v4
+* [X] Dépendances installées (Supabase, React Query, Papa Parse, Zod, etc.)
+* [X] Structure de dossiers créée selon l'architecture cible
+* [X] Types fondamentaux définis dans `types/index.ts`
+* [X] Client Supabase configuré (client + server avec @supabase/ssr)
+* [X] Middleware d'authentification fonctionnel
+* [X] Page de login avec Supabase Auth
+* [X] Layout dashboard avec sidebar et header
+* [X] Dark mode toggle fonctionnel (syntaxe Tailwind v4)
+* [X] Pages placeholder (import, history, settings)
+* [X] Base de données Supabase (schéma dédié `csv_importer`)
+* [X] Script PowerShell génération arborescence projet
+* [X] Tâche VS Code pour exécuter le script
+* [X] Documentation projet importée dans /docs
+* [X] Repository GitHub configuré et pushé
 
 ## 📁 Fichiers créés/modifiés
-| Fichier | Action | Description |
-|---------|--------|-------------|
-| ... | Créé | ... |
 
-## ⏳ Reste à faire
-- [ ] Item 1
-- [ ] Item 2
+| Fichier                                   | Action   | Description                                 |
+| ----------------------------------------- | -------- | ------------------------------------------- |
+| `app/(auth)/layout.tsx`                 | Créé   | Layout pages auth (centré)                 |
+| `app/(auth)/login/page.tsx`             | Créé   | Page connexion Supabase                     |
+| `app/(dashboard)/layout.tsx`            | Créé   | Layout dashboard avec sidebar               |
+| `app/(dashboard)/import/page.tsx`       | Créé   | Page import (placeholder)                   |
+| `app/(dashboard)/history/page.tsx`      | Créé   | Page historique (placeholder)               |
+| `app/(dashboard)/settings/page.tsx`     | Créé   | Page paramètres                            |
+| `app/globals.css`                       | Modifié | Tailwind v4 + dark mode variant             |
+| `app/layout.tsx`                        | Modifié | Ajout ThemeProvider                         |
+| `app/page.tsx`                          | Modifié | Redirect vers /import                       |
+| `components/layout/sidebar.tsx`         | Créé   | Navigation principale                       |
+| `components/layout/header.tsx`          | Créé   | Header avec logout + theme toggle           |
+| `components/layout/theme-toggle.tsx`    | Créé   | Toggle dark/light mode                      |
+| `components/theme-provider.tsx`         | Créé   | Provider next-themes                        |
+| `lib/infrastructure/supabase/client.ts` | Créé   | Client Supabase browser                     |
+| `lib/infrastructure/supabase/server.ts` | Créé   | Client Supabase server                      |
+| `middleware.ts`                         | Créé   | Protection routes authentifiées            |
+| `types/index.ts`                        | Créé   | Types TypeScript (Import, Validation, Zoho) |
+| `tailwind.config.ts`                    | Modifié | Config dark mode class                      |
+| `scripts/generate-tree.ps1`             | Créé   | Script génération arborescence            |
+| `.vscode/tasks.json`                    | Créé   | Tâche VS Code                              |
+| `docs/*`                                | Créé   | Documentation projet                        |
 
-## 📝 Notes pour la prochaine session
-...
+## 📊 Métriques
 
-## 🔗 Liens utiles
-- Repo: https://github.com/...
-- Vercel: https://...vercel.app
-- Supabase: https://...supabase.co
+| Métrique           | Valeur |
+| ------------------- | ------ |
+| Fichiers créés    | ~20    |
+| Fichiers modifiés  | 4      |
+| Commits             | 3      |
+| Packages installés | 12     |
+| Durée de session   | ~2h    |
+
+## 🐛 Bugs rencontrés et résolus
+
+1. **Dark mode Tailwind v4** : La syntaxe `darkMode: 'class'` dans `tailwind.config.ts` ne suffit plus. Solution : ajouter `@variant dark (&:where(.dark, .dark *));` dans `globals.css`
+2. **Caractères Unicode PowerShell** : Les caractères de dessin (└──, ├──) causaient des erreurs de parsing. Solution : utiliser des caractères ASCII simples (+--, |--)
+3. **Parenthèses dans PowerShell** : Les dossiers `(auth)` et `(dashboard)` nécessitent des guillemets dans les commandes PowerShell
+4. **Package manquant** : `@supabase/ssr` n'était pas installé par défaut avec `@supabase/auth-helpers-nextjs`
+
+## 📝 Notes techniques importantes
+
+### Tailwind CSS v4
+
+```css
+/* globals.css - Syntaxe obligatoire pour dark mode */
+@import "tailwindcss";
+@variant dark (&:where(.dark, .dark *));
+```
+
+### Supabase avec schéma dédié
+
+* Les tables sont dans `csv_importer.*` (pas `public.*`)
+* RLS activé sur toutes les tables
+* Utilisateur de test créé manuellement dans Supabase Dashboard
+
+### Next.js 15
+
+* App Router avec route groups `(auth)` et `(dashboard)`
+* Server Components par défaut
+* `'use client'` explicite pour les composants interactifs
+
+## ⏳ Reste à faire (hors scope mission 001)
+
+* [ ] Wizard d'import complet (Mission 002)
+* [ ] Moteur de validation
+* [ ] Intégration Zoho Analytics API
+* [ ] Éditeur de règles de validation
+* [ ] Connexion SFTP
+* [ ] Déploiement Vercel
+
+## 🔗 Continuité
+
+### Prochaine mission
+
+* **Titre** : Wizard d'Import CSV
+* **Fichier** : `missions/mission-002-wizard-import.md`
+* **Priorité** : Haute
+* **Objectif** : Implémenter le wizard d'import en 5 étapes
+
+### Liens utiles
+
+* **Repo GitHub** : https://github.com/Sainthilaire-thomas/csv-zoho-importer
+* **Supabase** : Projet existant avec schéma `csv_importer`
+* **Local** : http://localhost:3000
+
+### Commandes pour reprendre
+
+```powershell
+cd "C:\Users\thoma\OneDrive\SONEAR_2025\csv-zoho-importer"
+npm run dev
 ```
 
 ---
 
-*Mission créée le 17 novembre 2025*
-*À mettre à jour en fin de session avec le bilan*
+*Mission créée le : 2025-11-28*
+*Dernière mise à jour : 2025-11-28*
+*Statut : ✅ Complétée*
