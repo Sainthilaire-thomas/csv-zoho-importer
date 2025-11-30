@@ -93,9 +93,10 @@ export async function POST(request: NextRequest) {
     const zohoImportType = getZohoImportType(importMode);
     
     // 6. Effectuer l'import
-    const result = await client.importData({
+ const result = await client.importData({
       workspaceId,
       viewId: tableId,
+      viewName: tableName,  // <-- AJOUTER
       importType: zohoImportType,
       data: csvData,
       autoIdentify: true,

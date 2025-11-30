@@ -223,6 +223,7 @@ export const IMPORT_MODE_TO_ZOHO: Record<string, ZohoImportType> = {
 export interface ZohoImportParams {
   workspaceId: string;
   viewId: string;
+  viewName: string;
   importType: ZohoImportType;
   data: string; // CSV formaté
   autoIdentify?: boolean;
@@ -230,6 +231,8 @@ export interface ZohoImportParams {
   matchingColumns?: string[]; // Pour UPDATEADD et DELETEUPSERT
   skipFirstRow?: boolean;
 }
+
+
 
 /**
  * Réponse d'un import Zoho

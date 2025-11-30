@@ -1,6 +1,6 @@
 ﻿# Structure du projet - csv-zoho-importer
 
-*Genere le 2025-11-29 08:01:25*
+*Genere le 2025-11-30 11:16:46*
 ```
 csv-zoho-importer/
 |-- .vscode/
@@ -14,6 +14,7 @@ csv-zoho-importer/
 |   |   |-- history/
 |   |   |   +-- page.tsx
 |   |   |-- import/
+|   |   |   |-- import-page-client.tsx
 |   |   |   +-- page.tsx
 |   |   |-- settings/
 |   |   |   |-- rules/
@@ -28,7 +29,18 @@ csv-zoho-importer/
 |   |   |-- imports/
 |   |   |-- rules/
 |   |   +-- zoho/
-|   |       +-- tables/
+|   |       |-- folders/
+|   |       |   +-- route.ts
+|   |       |-- import/
+|   |       |   +-- route.ts
+|   |       |-- oauth/
+|   |       |   |-- authorize/
+|   |       |   |-- callback/
+|   |       |   |-- disconnect/
+|   |       |   +-- status/
+|   |       |-- tables/
+|   |       |   +-- route.ts
+|   |       +-- workspaces/
 |   |           +-- route.ts
 |   |-- favicon.ico
 |   |-- globals.css
@@ -47,6 +59,7 @@ csv-zoho-importer/
 |   |   |   +-- wizard-progress.tsx
 |   |   |-- file-upload.tsx
 |   |   |-- table-selector.tsx
+|   |   |-- table-selector-accordion.tsx
 |   |   +-- validation-results.tsx
 |   |-- layout/
 |   |   |-- header.tsx
@@ -58,6 +71,10 @@ csv-zoho-importer/
 |   |   |-- button.tsx
 |   |   |-- card.tsx
 |   |   +-- progress.tsx
+|   |-- zoho/
+|   |   |-- index.ts
+|   |   |-- zoho-connect-button.tsx
+|   |   +-- zoho-connection-status.tsx
 |   +-- theme-provider.tsx
 |-- config/
 |-- docs/
@@ -70,6 +87,8 @@ csv-zoho-importer/
 |   |   |-- architecture-cible.md
 |   |   |-- base-context.md
 |   |   +-- README.md
+|   |-- sql/
+|   |   +-- 002-user-zoho-tokens.sql
 |   |-- architecture-cible.md
 |   |-- doc-session.md
 |   |-- project-structure.md
@@ -96,6 +115,11 @@ csv-zoho-importer/
 |   |   |   |-- client.ts
 |   |   |   +-- server.ts
 |   |   +-- zoho/
+|   |       |-- auth.ts
+|   |       |-- client.ts
+|   |       |-- encryption.ts
+|   |       |-- index.ts
+|   |       +-- types.ts
 |   +-- utils/
 |-- public/
 |   |-- file.svg

@@ -1,7 +1,7 @@
 
 # CSV to Zoho Analytics Importer - Contexte de Base
 
-*Mis à jour le 2025-11-29 (Session 3)*
+*Mis à jour le 2025-11-30 (Session 4)*
 
 ---
 
@@ -64,7 +64,7 @@ Application web permettant d'automatiser l'import de fichiers CSV/Excel dans Zoh
 │                          ▼                                      │
 │                   API LAYER (Route Handlers)                    │
 │   /zoho/oauth/*  /zoho/workspaces  /zoho/tables  /zoho/folders │
-│   /zoho/import                                                  │
+│   /zoho/import ✅                                               │
 └─────────────────────────────────────────────────────────────────┘
                               │
               ┌───────────────┼───────────────┐
@@ -111,6 +111,46 @@ Chaque utilisateur connecte son propre compte Zoho via l'interface. Les tokens s
 
 ---
 
+## Import Zoho Analytics API v2 ✅ FONCTIONNEL
+
+### Endpoint correct
+
+```
+POST /restapi/v2/workspaces/{workspaceId}/views/{viewId}/data?CONFIG={encoded_json}
+```
+
+### Format de la requête
+
+```typescript
+// CONFIG en JSON encodé dans query string
+const config = {
+  importType: 'append',      // append|truncateadd|updateadd|deleteupsert|onlyadd
+  fileType: 'csv',
+  autoIdentify: true,
+  dateFormat: 'dd/MM/yyyy',
+  matchingColumns: ['col1']  // optionnel, pour updateadd/deleteupsert
+};
+
+// FormData avec fichier
+const formData = new FormData();
+formData.append('FILE', csvBlob, 'import.csv');  // ⚠️ 'FILE' pas 'ZOHO_FILE'
+
+// Headers
+{
+  'Authorization': 'Zoho-oauthtoken {access_token}',
+  'ZANALYTICS-ORGID': '{orgId}'
+}
+```
+
+### Points techniques import
+
+1. **CONFIG** : JSON encodé avec `encodeURIComponent()` dans query string
+2. **Fichier** : Champ `FILE` (pas `ZOHO_FILE`)
+3. **URL** : Utilise `viewId` (pas le nom de table)
+4. **importType** : En minuscules dans le CONFIG
+
+---
+
 ## Structure actuelle du projet
 
 ```
@@ -141,25 +181,25 @@ csv-zoho-importer/
 │   │       │   └── disconnect/route.ts  ✅
 │   │       ├── workspaces/route.ts      ✅
 │   │       ├── tables/route.ts          ✅
-│   │       ├── folders/route.ts         ✅ NOUVEAU
-│   │       └── import/route.ts          ⏳ À TESTER
+│   │       ├── folders/route.ts         ✅
+│   │       └── import/route.ts          ✅ FONCTIONNEL
 │   ├── globals.css
 │   ├── layout.tsx
 │   └── page.tsx
 ├── components/
 │   ├── import/
 │   │   ├── wizard/
-│   │   │   ├── import-wizard.tsx        ✅ Modifié
+│   │   │   ├── import-wizard.tsx        ✅
 │   │   │   ├── index.ts
-│   │   │   ├── step-config.tsx          ✅ Modifié (accordéon)
-│   │   │   ├── step-confirm.tsx
+│   │   │   ├── step-config.tsx          ✅ (accordéon)
+│   │   │   ├── step-confirm.tsx         ✅
 │   │   │   ├── step-review.tsx
 │   │   │   ├── step-source.tsx
 │   │   │   ├── step-validate.tsx
 │   │   │   └── wizard-progress.tsx
 │   │   ├── file-upload.tsx
 │   │   ├── table-selector.tsx
-│   │   ├── table-selector-accordion.tsx ✅ NOUVEAU
+│   │   ├── table-selector-accordion.tsx ✅
 │   │   └── validation-results.tsx
 │   ├── layout/
 │   │   ├── header.tsx
@@ -199,7 +239,7 @@ csv-zoho-importer/
 │   │       ├── types.ts
 │   │       ├── encryption.ts
 │   │       ├── auth.ts
-│   │       ├── client.ts
+│   │       ├── client.ts                ✅ importData corrigé
 │   │       └── index.ts
 │   └── utils/
 ├── types/
@@ -209,7 +249,7 @@ csv-zoho-importer/
 │       ├── missions/
 │       │   ├── mission-001-setup-initial.md
 │       │   ├── mission-002-wizard-import.md
-│       │   ├── mission-003-api-zoho.md
+│       │   ├── mission-003-api-zoho.md  ✅ COMPLÉTÉE
 │       │   └── TEMPLATE-MISSION.md
 │       ├── base-context.md
 │       └── README.md
@@ -287,6 +327,32 @@ export interface ZohoTokens {
   expiresAt: Date;
   scope: string;
   apiDomain: string;
+}
+
+// ==================== ZOHO IMPORT ====================
+
+export interface ZohoImportParams {
+  workspaceId: string;
+  viewId: string;
+  viewName: string;
+  importType: ImportMode;
+  data: string;           // CSV data
+  autoIdentify?: boolean;
+  dateFormat?: string;
+  matchingColumns?: string[];
+}
+
+export interface ZohoImportResponse {
+  success: boolean;
+  importSummary?: {
+    importType: string;
+    totalColumnCount: number;
+    selectedColumnCount: number;
+    totalRowCount: number;
+    successRowCount: number;
+    warnings: number;
+  };
+  error?: string;
 }
 ```
 
@@ -394,7 +460,7 @@ APP_URL=http://localhost:3000
 * Support CSV et Excel (.xlsx, .xls)
 * Traitement côté client (fichiers jusqu'à 200 MB)
 
-### ✅ Complété (Mission 003 - Sessions 1-3)
+### ✅ Complété (Mission 003 - Sessions 1-4)
 
 * OAuth2 flow complet fonctionnel
 * Stockage tokens chiffrés (AES-256-GCM)
@@ -404,14 +470,35 @@ APP_URL=http://localhost:3000
 * Composant accordéon pour sélection de tables
 * Recherche en temps réel sur les tables
 * UI connexion Zoho avec état visible
+* **Import réel vers Zoho Analytics fonctionnel** ✅
+  * Endpoint correct : `/views/{viewId}/data?CONFIG=...`
+  * Format API v2 avec CONFIG en query string
+  * Test réussi : 3 lignes → TEST_IMPORT
+  * Test réussi : 14 lignes → QUITTANCES (976ms)
 
-### ⏳ En cours (Mission 003 - Prochaine étape)
+### 📋 À faire (Mission 004 - Prochaine session)
 
-* **Test import réel vers Zoho Analytics**
-  * [ ] Tester route `/api/zoho/import`
-  * [ ] Valider les 5 modes d'import
-  * [ ] Tester avec fichier volumineux (57k lignes)
-  * [ ] Gérer les erreurs API Zoho
+**Renforcement de la qualité des imports :**
+
+1. **Récupération du schéma table Zoho**
+   * API pour obtenir les colonnes et leurs types
+   * Stocker en cache pour éviter appels répétés
+2. **Validation basée sur le schéma cible**
+   * Comparer colonnes fichier vs colonnes table Zoho
+   * Valider les types (date, number, text)
+   * Détecter colonnes manquantes/supplémentaires
+3. **Transformation automatique des données**
+   * Convertir formats de date
+   * Normaliser nombres (séparateurs décimaux)
+   * Mapper noms de colonnes si différents
+4. **Prévisualisation avant import**
+   * Afficher 5-10 lignes transformées
+   * Montrer les correspondances colonnes
+   * Alerter sur les problèmes potentiels
+5. **Vérification post-import**
+   * Comparer rowCount attendu vs importé
+   * Détecter les warnings Zoho
+   * Afficher rapport détaillé
 
 ### 📋 À faire (Futures missions)
 
@@ -479,7 +566,19 @@ npm run build
 **Cause** : Appel à `.json()` deux fois sur la même Response
 **Solution** : Stocker le résultat dans une variable avant de l'utiliser
 
+### 7. Endpoint import incorrect (Session 4) ✅ NOUVEAU
+
+**Symptôme** : Erreur 404 `URL_RULE_NOT_CONFIGURED`
+**Cause** : URL utilisait le nom de table au lieu du viewId
+**Solution** : Utiliser `/views/{viewId}/data` avec CONFIG en query string
+
+### 8. Paramètres import mal formatés (Session 4) ✅ NOUVEAU
+
+**Symptôme** : Erreur 500 lors de l'import
+**Cause** : Paramètres dans FormData au lieu de query string, `ZOHO_FILE` au lieu de `FILE`
+**Solution** : CONFIG encodé en JSON dans query string, fichier avec nom `FILE`
+
 ---
 
 *Ce document doit être mis à jour lorsque les types fondamentaux ou l'architecture changent.*
-*Dernière mise à jour : 2025-11-29 13:15*
+*Dernière mise à jour : 2025-11-30 12:30*

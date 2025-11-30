@@ -408,100 +408,156 @@ export class ZohoAnalyticsClient {
    * @param params - Paramètres d'import
    * @returns Résultat de l'import
    */
-  async importData(params: ZohoImportParams): Promise<ZohoImportResponse> {
-    const {
-      workspaceId,
-      viewId,
-      importType,
-      data,
-      autoIdentify = true,
-      dateFormat = 'dd/MM/yyyy',
-      matchingColumns,
-    } = params;
+  
+ async importData(params: ZohoImportParams): Promise<ZohoImportResponse> {
+  const {
+    workspaceId,
+    viewId,
+    viewName,
+    importType,
+    data,
+    autoIdentify = true,
+    dateFormat = 'dd/MM/yyyy',
+    matchingColumns,
+  } = params;
 
-    // Construire le form data
-    const formData: Record<string, string> = {
-      'ZOHO_ACTION': 'IMPORT',
-      'ZOHO_IMPORT_TYPE': importType,
-      'ZOHO_AUTO_IDENTIFY': autoIdentify ? 'true' : 'false',
-      'ZOHO_DATE_FORMAT': dateFormat,
-      'ZOHO_CREATE_TABLE': 'false',
-      'ZOHO_IMPORT_DATA': data,
+  // Nettoyer les données CSV
+  const cleanedData = this.cleanCsvData(data);
+  
+  // DEBUG
+  console.log('[Zoho Import] CSV nettoyé (500 premiers chars):');
+  console.log(cleanedData.substring(0, 500));
+  console.log('[Zoho Import] Headers:', cleanedData.split('\n')[0]);
+
+  // Construire le CONFIG JSON
+  const config: Record<string, any> = {
+    importType: importType.toLowerCase(), // append, truncateadd, updateadd, etc.
+    fileType: 'csv',
+    autoIdentify: autoIdentify,
+  };
+
+  if (dateFormat) {
+    config.dateFormat = dateFormat;
+  }
+
+  if (matchingColumns && matchingColumns.length > 0) {
+    config.matchingColumns = matchingColumns;
+  }
+
+  // Encoder le CONFIG pour le query string
+  const configEncoded = encodeURIComponent(JSON.stringify(config));
+  
+  // URL avec viewId et CONFIG dans query string
+  const url = `${this.tokens.apiDomain}/restapi/v2/workspaces/${workspaceId}/views/${viewId}/data?CONFIG=${configEncoded}`;
+
+  // Créer FormData avec FILE (pas ZOHO_FILE)
+  const formData = new FormData();
+  const csvBlob = new Blob([cleanedData], { type: 'text/csv; charset=utf-8' });
+  formData.append('FILE', csvBlob, 'import.csv');
+
+  const headers: Record<string, string> = {
+    'Authorization': `Zoho-oauthtoken ${this.tokens.accessToken}`,
+  };
+
+  if (this.tokens.orgId) {
+    headers['ZANALYTICS-ORGID'] = this.tokens.orgId;
+  }
+
+  // Log minimal
+  console.log('[Zoho Import] URL:', url);
+  console.log('[Zoho Import] Config:', JSON.stringify(config));
+  console.log('[Zoho Import] Rows:', cleanedData.split('\n').length - 1);
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+
+    const responseText = await response.text();
+    console.log('[Zoho Import] Status:', response.status);
+
+    let responseData: any;
+    try {
+      responseData = JSON.parse(responseText);
+    } catch {
+      responseData = { message: responseText };
+    }
+
+    if (!response.ok) {
+      console.error('[Zoho Import] Error:', JSON.stringify(responseData, null, 2));
+      
+      if (response.status === 401) {
+        throw new ZohoAuthError('Token Zoho invalide ou expiré', 'invalid_grant', true);
+      }
+
+      throw new ZohoApiError(
+        responseData.data?.errorMessage || responseData.message || `Erreur API Zoho : ${response.status}`,
+        responseData.data?.errorCode || responseData.error_code || 'API_ERROR',
+        response.status
+      );
+    }
+
+    console.log('[Zoho Import] Success:', JSON.stringify(responseData.data?.importSummary));
+
+    if (responseData.status === 'success' && responseData.data) {
+      return {
+        status: 'success',
+        importId: responseData.data?.importId,
+        importSummary: {
+          totalRowCount: responseData.data.importSummary?.totalRowCount || 0,
+          successRowCount: responseData.data.importSummary?.successRowCount || 0,
+          warningCount: responseData.data.importSummary?.warnings || 0,
+          failedRowCount: 0,
+          columnCount: responseData.data.importSummary?.totalColumnCount || 0,
+          importType: responseData.data.importSummary?.importType || importType,
+          importTime: new Date().toISOString(),
+        },
+        importErrors: responseData.data.importErrors ? 
+          (typeof responseData.data.importErrors === 'string' ? undefined : responseData.data.importErrors) 
+          : undefined,
+      };
+    }
+
+    return {
+      status: 'error',
+      errorMessage: responseData.data?.errorMessage || responseData.message || 'Erreur inconnue',
+      errorCode: responseData.data?.errorCode || responseData.error_code,
     };
 
-    // Ajouter les colonnes de matching pour UPDATEADD et DELETEUPSERT
-    if (matchingColumns && matchingColumns.length > 0) {
-      formData['ZOHO_MATCHING_COLUMNS'] = matchingColumns.join(',');
+  } catch (error) {
+    if (error instanceof ZohoApiError || error instanceof ZohoAuthError) {
+      throw error;
     }
+    console.error('[Zoho Import] Exception:', error);
+    return {
+      status: 'error',
+      errorMessage: error instanceof Error ? error.message : 'Erreur lors de l\'import',
+    };
+  }
+}
 
-    interface ImportResponse {
-      status: string;
-      summary?: {
-        importSummary: {
-          totalRowCount: number;
-          successRowCount: number;
-          warningsRowCount?: number;
-          failedRowCount: number;
-          columnCount: number;
-          importOperation: string;
-          importTime: string;
-        };
-        importErrors?: Array<{
-          rowIndex: number;
-          columnName?: string;
-          errorMessage: string;
-        }>;
-      };
-      data?: {
-        importId: string;
-      };
-      message?: string;
-      error_message?: string;
-      error_code?: string;
-    }
-
-    try {
-      const response = await this.postForm<ImportResponse>(
-        `/workspaces/${workspaceId}/views/${viewId}/data`,
-        formData
-      );
-
-      if (response.status === 'success' && response.summary) {
-        return {
-          status: 'success',
-          importId: response.data?.importId,
-          importSummary: {
-            totalRowCount: response.summary.importSummary.totalRowCount,
-            successRowCount: response.summary.importSummary.successRowCount,
-            warningCount: response.summary.importSummary.warningsRowCount || 0,
-            failedRowCount: response.summary.importSummary.failedRowCount,
-            columnCount: response.summary.importSummary.columnCount,
-            importType: response.summary.importSummary.importOperation,
-            importTime: response.summary.importSummary.importTime,
-          },
-          importErrors: response.summary.importErrors?.map(e => ({
-            rowIndex: e.rowIndex,
-            columnName: e.columnName,
-            errorMessage: e.errorMessage,
-          })),
-        };
-      }
-
-      return {
-        status: 'error',
-        errorMessage: response.message || response.error_message || 'Erreur inconnue',
-        errorCode: response.error_code,
-      };
-    } catch (error) {
-      if (error instanceof ZohoApiError || error instanceof ZohoAuthError) {
-        throw error;
-      }
-
-      return {
-        status: 'error',
-        errorMessage: error instanceof Error ? error.message : 'Erreur lors de l\'import',
-      };
-    }
+  /**
+   * Nettoie les données CSV pour éviter les erreurs d'import
+   */
+  private cleanCsvData(data: string): string {
+    return data
+      .split('\n')
+      .map(line => {
+        // Trim chaque cellule tout en préservant les guillemets
+        return line.split(',').map(cell => {
+          const trimmed = cell.trim();
+          // Si la cellule est entre guillemets, trim l'intérieur aussi
+          if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
+            const inner = trimmed.slice(1, -1).trim();
+            return `"${inner}"`;
+          }
+          return trimmed;
+        }).join(',');
+      })
+      .filter(line => line.trim() !== '') // Supprimer lignes vides
+      .join('\n');
   }
 
   /**
