@@ -6,3 +6,4 @@ export { StepConfig } from './step-config';
 export { StepValidate } from './step-validate';
 export { StepReview } from './step-review';
 export { StepConfirm } from './step-confirm';
+export { StepResolve } from './step-resolve';

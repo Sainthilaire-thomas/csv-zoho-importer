@@ -7,14 +7,17 @@ import { StepSource } from './step-source';
 import { StepConfig } from './step-config';
 import { StepValidate } from './step-validate';
 import { StepReview } from './step-review';
+import { StepResolve } from './step-resolve';
 import { StepConfirm } from './step-confirm';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { useImport } from '@/lib/hooks/use-import';
 import { useCsvParser } from '@/lib/hooks/use-csv-parser';
 import { useValidation } from '@/lib/hooks/use-validation';
+import { validateSchema } from '@/lib/domain/schema-validator';
 import { RotateCcw } from 'lucide-react';
 import type { FileSource, TableValidationConfig } from '@/types';
+import type { SchemaValidationResult, ZohoTableSchema, ResolvableIssue } from '@/lib/infrastructure/zoho/types';
 import Papa from 'papaparse';
 
 interface ZohoWorkspace {
@@ -66,9 +69,14 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
   const [workspacesError, setWorkspacesError] = useState<string | null>(null);
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string>('');
 
-  // Tables
-
+  // Données parsées et validation de schéma
   const [parsedData, setParsedData] = useState<Record<string, unknown>[] | null>(null);
+  const [schemaValidation, setSchemaValidation] = useState<SchemaValidationResult | null>(null);
+  const [zohoSchema, setZohoSchema] = useState<ZohoTableSchema | null>(null);
+
+  // Issues résolues par l'utilisateur
+  const [resolvedIssues, setResolvedIssues] = useState<ResolvableIssue[] | null>(null);
+  const [issuesResolved, setIssuesResolved] = useState(false);
 
   // Charger les workspaces au montage
   useEffect(() => {
@@ -85,8 +93,7 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
         }
 
         setWorkspaces(data.workspaces || []);
-        
-        // Si un seul workspace, le sélectionner automatiquement
+
         if (data.workspaces?.length === 1) {
           setSelectedWorkspaceId(data.workspaces[0].id);
         }
@@ -101,7 +108,6 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
     fetchWorkspaces();
   }, []);
 
-
   const handleSourceChange = useCallback((source: FileSource) => {
     if (source === 'sftp') {
       return;
@@ -110,9 +116,40 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
 
   const handleWorkspaceChange = useCallback((workspaceId: string) => {
     setSelectedWorkspaceId(workspaceId);
-    // Reset la sélection de table quand on change de workspace
     setTable('', '');
+    setSchemaValidation(null);
+    setZohoSchema(null);
+    setResolvedIssues(null);
+    setIssuesResolved(false);
   }, [setTable]);
+
+  // Récupérer le schéma Zoho d'une table
+  const fetchZohoSchema = useCallback(async (workspaceId: string, viewId: string, viewName: string): Promise<ZohoTableSchema | null> => {
+    try {
+      console.log('[Schema] Fetching schema for', viewId);
+      const response = await fetch(`/api/zoho/columns?workspaceId=${workspaceId}&viewId=${viewId}`);
+      const data = await response.json();
+
+      if (!response.ok) {
+        console.error('[Schema] Error:', data.error);
+        return null;
+      }
+
+      const schema: ZohoTableSchema = {
+        viewId,
+        viewName,
+        workspaceId,
+        columns: data.columns || [],
+        fetchedAt: new Date(),
+      };
+
+      console.log('[Schema] Found', schema.columns.length, 'columns');
+      return schema;
+    } catch (error) {
+      console.error('[Schema] Exception:', error);
+      return null;
+    }
+  }, []);
 
   const handleValidation = useCallback(async () => {
     console.log('handleValidation demarre');
@@ -122,24 +159,67 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
     }
 
     startValidation();
+    
+    // Reset les états de résolution
+    setResolvedIssues(null);
+    setIssuesResolved(false);
 
     try {
+      // Phase 1: Parsing du fichier
       updateProgress({ phase: 'parsing', current: 0, total: 100, percentage: 0 });
-      
       console.log('Debut du parsing...');
       const parseResult = await parseFile(state.config.file);
       console.log('Parsing termine, lignes:', parseResult.totalRows);
       setParsedData(parseResult.data);
-
       updateProgress({ phase: 'parsing', current: 100, total: 100, percentage: 20 });
 
+      // Phase 2: Récupération du schéma Zoho
+      updateProgress({ phase: 'validating', current: 20, total: 100, percentage: 30 });
+      console.log('Recuperation du schema Zoho...');
+      const schema = await fetchZohoSchema(selectedWorkspaceId, state.config.tableId, state.config.tableName);
+      setZohoSchema(schema);
+
+      // Phase 3: Validation du schéma (correspondance colonnes)
+      if (schema && schema.columns.length > 0) {
+        updateProgress({ phase: 'validating', current: 40, total: 100, percentage: 50 });
+        console.log('Validation du schema...');
+
+        // Extraire les headers et données pour la validation
+        const headers = parseResult.data.length > 0 ? Object.keys(parseResult.data[0]) : [];
+        const sampleData = parseResult.data.slice(0, 100).map(row =>
+          headers.map(h => String((row as Record<string, unknown>)[h] ?? ''))
+        );
+
+        const schemaResult = validateSchema({
+          fileHeaders: headers,
+          sampleData,
+          zohoSchema: schema,
+        });
+
+        setSchemaValidation(schemaResult);
+        console.log('Schema validation:', schemaResult.summary);
+        
+        // Log des issues détectées
+        if (schemaResult.resolvableIssues && schemaResult.resolvableIssues.length > 0) {
+          console.log('Issues à résoudre:', schemaResult.resolvableIssues.length);
+          schemaResult.resolvableIssues.forEach(issue => {
+            console.log(`  - ${issue.type}: ${issue.column} - ${issue.message}`);
+          });
+        }
+      } else {
+        console.log('Pas de schema Zoho disponible, validation classique uniquement');
+        setSchemaValidation(null);
+      }
+
+      // Phase 4: Validation des données (règles métier)
+      updateProgress({ phase: 'validating', current: 60, total: 100, percentage: 70 });
       const validationConfig: TableValidationConfig = {
         tableId: state.config.tableId,
         tableName: state.config.tableName,
         columns: [],
       };
 
-      console.log('Debut de la validation...');
+      console.log('Debut de la validation des donnees...');
       const result = await validate(parseResult.data, validationConfig);
       console.log('Validation terminee:', result);
 
@@ -150,7 +230,7 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
         error instanceof Error ? error.message : 'Erreur lors de la validation'
       );
     }
-  }, [state.config.file, state.config.tableId, state.config.tableName, startValidation, updateProgress, parseFile, validate, setValidationResult, setValidationError]);
+  }, [state.config.file, state.config.tableId, state.config.tableName, selectedWorkspaceId, startValidation, updateProgress, parseFile, fetchZohoSchema, validate, setValidationResult, setValidationError]);
 
   const handleImport = useCallback(async () => {
     if (!parsedData || !state.config.tableId || !state.validation) return;
@@ -158,13 +238,11 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
     startImport();
 
     try {
-      // Filtrer les données valides
       const validData = parsedData.filter((_, index) => {
         const lineNumber = index + 2;
         return !state.validation!.errors.some((err) => err.line === lineNumber);
       });
 
-      // Convertir en CSV
       const csvData = Papa.unparse(validData);
 
       updateProgress({
@@ -174,7 +252,6 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
         percentage: 0,
       });
 
-      // Appel API pour import réel vers Zoho
       const response = await fetch('/api/zoho/import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -204,6 +281,10 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
       });
 
       setParsedData(null);
+      setSchemaValidation(null);
+      setZohoSchema(null);
+      setResolvedIssues(null);
+      setIssuesResolved(false);
     } catch (error) {
       console.error('Erreur import:', error);
       setImportError(
@@ -211,6 +292,18 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
       );
     }
   }, [parsedData, state.config, state.validation, selectedWorkspaceId, startImport, updateProgress, setImportSuccess, setImportError]);
+
+  // Handler pour la résolution des issues
+  const handleIssuesResolved = useCallback((resolved: ResolvableIssue[]) => {
+    console.log('Issues résolues:', resolved.length);
+    setResolvedIssues(resolved);
+    setIssuesResolved(true);
+  }, []);
+
+  // Vérifier si on doit afficher l'étape de résolution
+  const hasUnresolvedIssues = schemaValidation?.resolvableIssues && 
+    schemaValidation.resolvableIssues.length > 0 && 
+    !issuesResolved;
 
   const renderStep = () => {
     switch (state.status) {
@@ -235,16 +328,14 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
                 {workspacesError}
               </Alert>
             )}
-           
-           <StepConfig
+
+            <StepConfig
               fileName={state.config.file?.name ?? ''}
               fileSize={state.config.file?.size ?? 0}
-              // Workspaces
               workspaces={workspaces}
               selectedWorkspaceId={selectedWorkspaceId}
               isLoadingWorkspaces={isLoadingWorkspaces}
               onWorkspaceSelect={handleWorkspaceChange}
-              // Tables - le composant TableSelectorAccordion gère le chargement
               selectedTableId={state.config.tableId}
               importMode={state.config.importMode}
               onTableSelect={setTable}
@@ -266,13 +357,34 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
         );
 
       case 'reviewing':
+        // Si des issues sont à résoudre et pas encore résolues, afficher StepResolve
+        if (hasUnresolvedIssues && schemaValidation?.resolvableIssues) {
+          return (
+            <StepResolve
+              issues={schemaValidation.resolvableIssues}
+              onResolve={handleIssuesResolved}
+              onBack={goBack}
+            />
+          );
+        }
+        
+        // Sinon afficher la review normale
         return state.validation ? (
           <StepReview
             validation={state.validation}
+            schemaValidation={schemaValidation}
             tableName={state.config.tableName}
             importMode={state.config.importMode}
             isImporting={isImporting}
-            onBack={goBack}
+            onBack={() => {
+              // Si on revient en arrière depuis review après résolution,
+              // on revient à la résolution
+              if (resolvedIssues && schemaValidation?.resolvableIssues && schemaValidation.resolvableIssues.length > 0) {
+                setIssuesResolved(false);
+              } else {
+                goBack();
+              }
+            }}
             onImport={handleImport}
           />
         ) : null;
@@ -320,7 +432,7 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
   return (
     <div className={`space-y-8 ${className}`}>
       {!['success', 'error'].includes(state.status) && (
-        <WizardProgress currentStatus={state.status} />
+        <WizardProgress currentStatus={state.status} isResolving={hasUnresolvedIssues} />
       )}
       {renderStep()}
     </div>

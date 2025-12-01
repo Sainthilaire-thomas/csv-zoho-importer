@@ -1,273 +1,264 @@
 
-# Mission 004 - Renforcement Qualité des Imports
+# Mission 004 - Validation basée sur schéma Zoho
 
-**Statut** : 🆕 Nouvelle
-**Date création** : 2025-11-30
-**Prérequis** : Mission 003 complétée (import fonctionnel)
+**Statut** : 🔄 En cours
+**Date début** : 2025-11-30
+**Sessions** : 2
+**Prérequis** : Mission 003 complétée
 
 ---
 
 ## 🎯 Objectif
 
-Garantir la qualité des imports en validant les données AVANT envoi vers Zoho Analytics, en se basant sur le schéma réel de la table cible, et en offrant une prévisualisation des transformations.
+Garantir la qualité des imports en validant les données du fichier contre le schéma de la table Zoho cible, avec transformations explicites et vérification post-import.
 
 ---
 
-## 📋 Contexte
+## 📋 Bilan des sessions
 
-### Situation actuelle
+### Session 1 (2025-11-30 matin)
 
-L'import vers Zoho Analytics fonctionne (Mission 003), mais :
-- Aucune validation basée sur le schéma réel de la table Zoho
-- Pas de vérification des types de colonnes
-- Risque d'erreurs silencieuses (Zoho peut ignorer des colonnes mal formatées)
-- Pas de prévisualisation avant import
-- Pas de contrôle post-import
+**Travail accompli :**
 
-### Problèmes à résoudre
+* ✅ Types TypeScript créés pour validation schéma
+  * `ZohoColumn`, `DetectedColumnType`, `ColumnMapping`
+  * `SchemaValidationResult`, `SchemaValidationError`, `SchemaValidationWarning`
+* ✅ Service `SchemaValidator` implémenté (~400 lignes)
+  * Détection automatique des types de colonnes
+  * Correspondance fichier ↔ Zoho avec scoring
+  * Analyse de compatibilité des types
+* ✅ Route API `/api/zoho/columns` créée
+* ✅ Intégration dans le wizard (4 phases de validation)
+* ✅ Refonte `StepReview` avec affichage validation schéma
+  * Composant `ColumnMappingRow` avec icônes statut
+  * Composant `SchemaValidationSection`
 
-1. **Erreurs silencieuses** : Zoho peut importer partiellement sans alerter
-2. **Formats incompatibles** : Dates, nombres avec mauvais séparateurs
-3. **Colonnes manquantes/extra** : Fichier ne correspond pas à la table
-4. **Pas de visibilité** : L'utilisateur ne sait pas ce qui sera importé
+**Problème identifié :**
+
+* ❌ Erreur 500 sur endpoint `/workspaces/{workspaceId}/views/{viewId}/columns`
+* L'endpoint n'existe pas dans l'API Zoho v2
+
+### Session 2 (2025-11-30 après-midi)
+
+**Travail accompli :**
+
+* ✅ Correction de l'endpoint API Zoho pour récupérer les colonnes
+  * Ancien (incorrect) : `/workspaces/{id}/views/{id}/columns`
+  * Nouveau (correct) : `/views/{id}?CONFIG={"withInvolvedMetaInfo":true}`
+* ✅ Méthode `getColumns()` dans `client.ts` corrigée
+* ✅ Test réussi : 23 colonnes récupérées pour table QUITTANCES
+* ✅ Validation schéma testée avec succès
+  * 22 colonnes mappées
+  * 4 avertissements détectés (types incompatibles)
+* ✅ **Spécifications validation avancée rédigées** (document complet)
+  * Parcours de validation en 6 étapes
+  * Profils d'import réutilisables
+  * Transformation explicite des données
+  * Vérification post-import
+  * Stratégie de rollback (phase ultérieure)
+
+**Décisions stratégiques prises :**
+
+* Rollback : Spécifié mais implémenté en phase ultérieure
+* Détection profil : Par structure colonnes (pas par nom fichier)
+* Partage profils : Oui, tous utilisateurs partagent les profils
+* Archivage : Métadonnées uniquement (RGPD compliant)
+* Traitement : 100% côté client → envoi direct Zoho
 
 ---
 
-## 🔧 Fonctionnalités prévues
+## 🔧 Solution technique - API Colonnes
 
-### F1 - Récupération du schéma de la table Zoho
+### Endpoint correct (API v2)
 
-**Description** : Obtenir les métadonnées (colonnes, types) de la table cible avant import.
-
-**API Zoho à utiliser** :
-```
-GET /restapi/v2/workspaces/{workspaceId}/views/{viewId}/columns
-```
-
-**Données attendues** :
 ```typescript
-interface ZohoColumn {
-  columnName: string;
-  columnId: string;
-  dataType: 'PLAIN' | 'NUMBER' | 'CURRENCY' | 'PERCENT' | 'DATE' | 'EMAIL' | 'URL';
-  dateFormat?: string;
-  decimalPlaces?: number;
-  isRequired?: boolean;
+// lib/infrastructure/zoho/client.ts
+
+async getColumns(workspaceId: string, viewId: string): Promise<ZohoColumn[]> {
+  const config = { withInvolvedMetaInfo: true };
+  const configEncoded = encodeURIComponent(JSON.stringify(config));
+  
+  const response = await this.request<ViewDetailsResponse>(
+    `/views/${viewId}?CONFIG=${configEncoded}`
+  );
+
+  const columns = response.data?.views?.columns || [];
+  return columns.map(col => ({
+    columnName: col.columnName,
+    columnDesc: col.columnDesc || col.columnName,
+    dataType: col.dataType,
+    isUnique: col.isUnique || false,
+    isLookup: col.isLookup || false,
+    isMandatory: col.isMandatory || false
+  }));
 }
 ```
 
-**Actions** :
-- [ ] Créer route API `/api/zoho/columns`
-- [ ] Ajouter méthode `getColumns()` dans `client.ts`
-- [ ] Cacher le schéma en mémoire (éviter appels répétés)
+### Réponse API Zoho
 
----
-
-### F2 - Validation basée sur le schéma
-
-**Description** : Comparer les colonnes du fichier avec celles de la table Zoho.
-
-**Vérifications** :
-- [ ] Colonnes du fichier présentes dans la table Zoho
-- [ ] Colonnes Zoho obligatoires présentes dans le fichier
-- [ ] Types compatibles (date → date, nombre → nombre)
-- [ ] Alertes pour colonnes supplémentaires (ignorées par Zoho)
-
-**Résultat attendu** :
-```typescript
-interface SchemaValidationResult {
-  isValid: boolean;
-  matchedColumns: ColumnMapping[];
-  missingRequired: string[];      // Colonnes Zoho requises absentes
-  extraColumns: string[];         // Colonnes fichier non reconnues
-  typeWarnings: TypeWarning[];    // Types incompatibles
-}
-
-interface ColumnMapping {
-  fileColumn: string;
-  zohoColumn: string;
-  fileType: 'string' | 'number' | 'date';
-  zohoType: ZohoDataType;
-  isCompatible: boolean;
-  transformNeeded?: 'date_format' | 'number_format';
+```json
+{
+  "status": "success",
+  "data": {
+    "views": {
+      "viewId": "1718953000024195004",
+      "viewName": "QUITTANCES",
+      "viewType": "Table",
+      "columns": [
+        {
+          "columnName": "Journal",
+          "dataType": "PLAIN",
+          "isUnique": false,
+          "isMandatory": false
+        },
+        {
+          "columnName": "Date début",
+          "dataType": "DATE_AS_DATE",
+          "isUnique": false,
+          "isMandatory": false
+        }
+        // ... 21 autres colonnes
+      ]
+    }
+  }
 }
 ```
 
-**Actions** :
-- [ ] Créer service `SchemaValidator`
-- [ ] Intégrer dans étape "Validation" du wizard
-- [ ] Afficher résultat de comparaison visuel
+---
+
+## 📁 Fichiers créés/modifiés
+
+### Session 1
+
+| Fichier                                        | Status | Description                    |
+| ---------------------------------------------- | ------ | ------------------------------ |
+| `lib/infrastructure/zoho/types.ts`           | ✅     | Types ZohoColumn, etc.         |
+| `lib/domain/schema-validator.ts`             | ✅     | Service validation ~400 lignes |
+| `app/api/zoho/columns/route.ts`              | ✅     | Route API colonnes             |
+| `components/import/wizard/import-wizard.tsx` | ✅     | Intégration 4 phases          |
+| `components/import/wizard/step-review.tsx`   | ✅     | Affichage validation schéma   |
+| `types/index.ts`                             | ✅     | Types validation schéma       |
+
+### Session 2
+
+| Fichier                               | Status | Description                     |
+| ------------------------------------- | ------ | ------------------------------- |
+| `lib/infrastructure/zoho/client.ts` | ✅     | Méthode getColumns() corrigée |
+| `docs/specs-validation-avancee.md`  | ✅     | Document complet créé         |
+| `docs/architecture-cible.md`        | 📋     | Amendements identifiés         |
 
 ---
 
-### F3 - Transformation automatique des données
+## 📊 Résultats des tests
 
-**Description** : Convertir automatiquement les données au format attendu par Zoho.
+### Test validation schéma - Table QUITTANCES
 
-**Transformations** :
-- [ ] **Dates** : Détecter format source, convertir vers format Zoho
-  - `01/12/2025` → `2025-12-01` (si Zoho attend ISO)
-  - `December 1, 2025` → `01/12/2025`
-- [ ] **Nombres** : Normaliser séparateurs
-  - `1 234,56` → `1234.56`
-  - `$1,234.56` → `1234.56`
-- [ ] **Texte** : Trim, normalisation espaces
-
-**Actions** :
-- [ ] Créer service `DataTransformer`
-- [ ] Configurer règles de transformation par type
-- [ ] Permettre override manuel si besoin
-
----
-
-### F4 - Prévisualisation avant import
-
-**Description** : Afficher un aperçu des données transformées avant l'import réel.
-
-**Interface** :
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│  Prévisualisation de l'import                                   │
-│                                                                 │
-│  Table cible : QUITTANCES                                       │
-│  Lignes à importer : 14                                         │
-│                                                                 │
-│  Correspondance des colonnes :                                  │
-│  ┌─────────────────┬─────────────────┬────────────────────────┐│
-│  │ Fichier         │ Table Zoho      │ Status                 ││
-│  ├─────────────────┼─────────────────┼────────────────────────┤│
-│  │ Date_Emission   │ DATE_EMISSION   │ ✅ Format: dd/MM/yyyy  ││
-│  │ Montant_TTC     │ MONTANT_TTC     │ ✅ Nombre              ││
-│  │ Email_Client    │ EMAIL_CLIENT    │ ✅ Email               ││
-│  │ Notes           │ -               │ ⚠️ Colonne ignorée     ││
-│  └─────────────────┴─────────────────┴────────────────────────┘│
-│                                                                 │
-│  Aperçu des données (5 premières lignes) :                      │
-│  ┌─────────────┬─────────────┬────────────────────────────────┐│
-│  │ DATE_EMIS.  │ MONTANT_TTC │ EMAIL_CLIENT                   ││
-│  ├─────────────┼─────────────┼────────────────────────────────┤│
-│  │ 01/12/2025  │ 1234.56     │ client@email.com               ││
-│  │ 02/12/2025  │ 987.65      │ autre@email.com                ││
-│  │ ...         │ ...         │ ...                            ││
-│  └─────────────┴─────────────┴────────────────────────────────┘│
-│                                                                 │
-│              [Annuler]    [Confirmer l'import]                  │
-└─────────────────────────────────────────────────────────────────┘
+Workspace: 1718953000014173074
+Table: QUITTANCES (viewId: 1718953000024195004)
+Colonnes Zoho: 23
+
+Résultat validation:
+- 22 colonnes mappées
+- 4 avertissements détectés
+- 14 lignes valides
+- 0 erreurs
+
+Incompatibilités détectées:
+1. Date début (date) → DATE_AS_DATE : ❌ Type incompatible
+2. Heure début (string) → DURATION : ❌ Type incompatible
+3. Date fin (date) → DATE_AS_DATE : ❌ Type incompatible
+4. Heure fin (string) → DURATION : ❌ Type incompatible
 ```
 
-**Actions** :
-- [ ] Créer composant `ImportPreview`
-- [ ] Intégrer dans étape "Review" du wizard
-- [ ] Afficher warnings visuellement
+**Constat important :** L'import a fonctionné malgré les croix rouges car Zoho a converti automatiquement. C'est exactement ce comportement "boîte noire" qu'on veut éliminer.
 
 ---
 
-### F5 - Vérification post-import
+## 📝 Spécifications produites
 
-**Description** : Analyser la réponse Zoho pour détecter les problèmes.
+### Document specs-validation-avancee.md
 
-**Vérifications** :
-- [ ] `successRowCount` === `totalRowCount` attendu
-- [ ] `warnings` === 0 (sinon afficher détails)
-- [ ] Colonnes sélectionnées === colonnes attendues
+Contenu complet :
 
-**Rapport post-import** :
-```typescript
-interface ImportReport {
-  success: boolean;
-  summary: {
-    expected: number;
-    imported: number;
-    skipped: number;
-    warnings: number;
-  };
-  details: {
-    columnsUsed: string[];
-    columnsIgnored: string[];
-    warningMessages: string[];
-  };
-  recommendations: string[];  // Suggestions pour améliorer
-}
+1. **Objectif et principes** - Explicite, échec rapide, vérification
+2. **Parcours de validation** - 6 étapes détaillées avec wireframes
+3. **Profils d'import** - Détection par structure, partage, vérification cohérence
+4. **Rollback** - Stratégie via API DELETE (phase ultérieure)
+5. **Cas particuliers** - Dates ambiguës, notation scientifique, caractères spéciaux
+6. **Base de données** - Tables import_profiles et import_history
+7. **Priorités d'implémentation** - Phase 1 (critique), 2 (important), 3 (souhaitable)
+
+---
+
+## ⏳ Reste à faire
+
+### Phase 1 - Critique (Mission 004 suite)
+
+* [ ] Interface résolution des incompatibilités (❌ → action utilisateur)
+* [ ] Service DataTransformer (transformations explicites)
+* [ ] Prévisualisation données transformées
+* [ ] Vérification post-import basique (comparaison envoyé vs stocké)
+* [ ] Appliquer amendements à architecture-cible.md
+
+### Phase 2 - Important (Mission 005)
+
+* [ ] Tables Supabase : import_profiles, import_history
+* [ ] Service ProfileManager (détection, sauvegarde, chargement)
+* [ ] Interface gestion des profils
+* [ ] Seuil d'erreurs configurable
+
+### Phase 3 - Souhaitable (Future)
+
+* [ ] Rollback après import test
+* [ ] Historique enrichi avec rapport téléchargeable
+* [ ] Export PDF des rapports
+
+---
+
+## 🔗 Documents de référence
+
+| Document                        | Description                           |
+| ------------------------------- | ------------------------------------- |
+| `specs-validation-avancee.md` | Spécifications complètes validation |
+| `architecture-cible.md`       | Architecture technique v2.0           |
+| `base-context.md`             | Contexte projet mis à jour           |
+
+---
+
+## 📝 Notes pour la prochaine session
+
+### Contexte à retenir
+
+1. L'endpoint `/views/{id}?CONFIG={"withInvolvedMetaInfo":true}` fonctionne
+2. La validation schéma affiche correctement les correspondances
+3. Les specs validation avancée sont complètes et validées
+4. L'architecture-cible.md a besoin d'amendements (identifiés)
+
+### Points de départ suggérés
+
+1. **Option A** : Implémenter résolution des incompatibilités (interface utilisateur)
+2. **Option B** : Créer DataTransformer pour transformations explicites
+3. **Option C** : Implémenter vérification post-import
+
+### Données techniques
+
+```
+Workspace ID: 1718953000014173074
+View ID (QUITTANCES): 1718953000024195004
+Org ID: 667999054
+Endpoint colonnes: /views/{viewId}?CONFIG=%7B%22withInvolvedMetaInfo%22%3Atrue%7D
 ```
 
-**Actions** :
-- [ ] Enrichir `step-confirm.tsx` avec rapport détaillé
-- [ ] Afficher warnings si présents
-- [ ] Proposer actions correctives
+### Commandes pour reprendre
 
----
-
-## 📁 Fichiers à créer/modifier
-
-### Nouveaux fichiers
-
-| Fichier                                    | Description                           |
-| ------------------------------------------ | ------------------------------------- |
-| `app/api/zoho/columns/route.ts`            | API récupération schéma table         |
-| `lib/domain/schema-validator.ts`           | Service validation schéma             |
-| `lib/domain/data-transformer.ts`           | Service transformation données        |
-| `components/import/import-preview.tsx`     | Composant prévisualisation            |
-| `components/import/column-mapping.tsx`     | Affichage correspondance colonnes     |
-
-### Fichiers à modifier
-
-| Fichier                                    | Modification                          |
-| ------------------------------------------ | ------------------------------------- |
-| `lib/infrastructure/zoho/client.ts`        | Ajouter `getColumns()`                |
-| `lib/infrastructure/zoho/types.ts`         | Ajouter `ZohoColumn` interface        |
-| `components/import/wizard/step-validate.tsx` | Intégrer validation schéma          |
-| `components/import/wizard/step-review.tsx` | Intégrer prévisualisation             |
-| `components/import/wizard/step-confirm.tsx` | Enrichir rapport                     |
-
----
-
-## ✅ Critères de succès
-
-### Fonctionnel
-
-- [ ] Schéma de table Zoho récupéré automatiquement
-- [ ] Correspondance colonnes fichier ↔ table affichée
-- [ ] Alertes visuelles pour incompatibilités
-- [ ] Prévisualisation des 5-10 premières lignes transformées
-- [ ] Rapport post-import avec détails
-
-### Technique
-
-- [ ] Cache du schéma pour éviter requêtes répétées
-- [ ] Transformations configurables par type
-- [ ] Gestion des erreurs Zoho API
-
-### UX
-
-- [ ] Interface claire et intuitive
-- [ ] Warnings non bloquants mais visibles
-- [ ] Possibilité de forcer l'import malgré warnings
-
----
-
-## 📊 Estimation
-
-| Tâche                           | Complexité | Estimation |
-| ------------------------------- | ---------- | ---------- |
-| API columns + client            | Faible     | 30 min     |
-| Service SchemaValidator         | Moyenne    | 1h         |
-| Service DataTransformer         | Moyenne    | 1h         |
-| Composant ImportPreview         | Moyenne    | 1h30       |
-| Intégration wizard              | Moyenne    | 1h         |
-| Rapport post-import             | Faible     | 30 min     |
-| Tests et debug                  | Variable   | 1h         |
-| **Total estimé**                |            | **~6-7h**  |
-
----
-
-## 🔗 Documentation Zoho utile
-
-- [Get View Columns](https://www.zoho.com/analytics/api/v2/get-view-columns.html)
-- [Import Data Types](https://www.zoho.com/analytics/api/v2/bulk-api/import-data/data-types.html)
-- [Date Formats](https://www.zoho.com/analytics/api/v2/bulk-api/import-data/date-formats.html)
+```powershell
+cd "C:\Users\thoma\OneDrive\SONEAR_2025\csv-zoho-importer"
+npm run dev
+```
 
 ---
 
 *Mission créée le : 2025-11-30*
-*Dernière mise à jour : 2025-11-30*
-*Statut : 🆕 Nouvelle - Prête à démarrer*
+*Dernière mise à jour : 2025-11-30 18:00*
+*Statut : 🔄 En cours*![1764570677131](image/specs-fonctionnelles/1764570677131.png)

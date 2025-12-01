@@ -337,3 +337,118 @@ export class ZohoAuthError extends Error {
     this.name = 'ZohoAuthError';
   }
 }
+
+// ==================== VALIDATION DE SCHÉMA (Mission 004) ====================
+
+/**
+ * Type de colonne détecté dans le fichier CSV/Excel
+ */
+export type FileColumnType = 'string' | 'number' | 'date' | 'email' | 'boolean' | 'unknown';
+
+/**
+ * Mapping entre une colonne du fichier et une colonne Zoho
+ */
+export interface ColumnMapping {
+  fileColumn: string;           // Nom colonne dans le fichier
+  zohoColumn: string | null;    // Nom colonne Zoho correspondante
+  fileType: FileColumnType;     // Type détecté dans le fichier
+  zohoType: ZohoDataType | null;// Type attendu par Zoho
+  zohoDateFormat?: string;      // Format date si applicable
+  isCompatible: boolean;        // Types compatibles ?
+  isMapped: boolean;            // Correspondance trouvée ?
+  isRequired: boolean;          // Colonne requise par Zoho ?
+  transformNeeded?: 'date_format' | 'number_format' | 'trim' | 'none';
+  sampleValues: string[];       // Échantillon de valeurs (max 5)
+  confidence: number;           // Score de confiance mapping (0-100)
+}
+
+/**
+ * Avertissement sur un type de colonne
+ */
+export interface TypeWarning {
+  column: string;
+  fileType: FileColumnType;
+  zohoType: ZohoDataType;
+  message: string;
+  severity: 'error' | 'warning' | 'info';
+  suggestion?: string;
+}
+
+/**
+ * Résultat de la validation du schéma
+ */
+export interface SchemaValidationResult {
+  isValid: boolean;
+  hasWarnings: boolean;
+  canProceed: boolean;          // Peut-on continuer malgré warnings ?
+  matchedColumns: ColumnMapping[];
+  missingRequired: string[];    // Colonnes Zoho obligatoires absentes
+  extraColumns: string[];       // Colonnes fichier non reconnues
+  typeWarnings: TypeWarning[];
+  resolvableIssues: ResolvableIssue[];
+  summary: {
+    totalFileColumns: number;
+    totalZohoColumns: number;
+    matchedCount: number;
+    unmatchedCount: number;
+    warningCount: number;
+    errorCount: number;
+  };
+}
+
+/**
+ * Schéma complet d'une table Zoho (pour cache)
+ */
+export interface ZohoTableSchema {
+  viewId: string;
+  viewName: string;
+  workspaceId: string;
+  columns: ZohoColumn[];
+  fetchedAt: Date;
+}
+
+
+// ==================== RÉSOLUTION DES INCOMPATIBILITÉS (Mission 004) ====================
+
+/**
+ * Types de problèmes résolvables par l'utilisateur
+ */
+export type ResolvableIssueType = 
+  | 'ambiguous_date_format'    // Date JJ/MM vs MM/JJ
+  | 'scientific_notation'      // Nombre en notation scientifique (1.5E6)
+  | 'type_incompatible';       // Type fichier incompatible avec Zoho
+
+/**
+ * Formats de date supportés
+ */
+export type DateFormatOption = 'DD/MM/YYYY' | 'MM/DD/YYYY' | 'YYYY-MM-DD' | 'DD-MM-YYYY';
+
+/**
+ * Problème à résoudre par l'utilisateur
+ */
+export interface ResolvableIssue {
+  id: string;
+  type: ResolvableIssueType;
+  column: string;
+  message: string;
+  sampleValues: string[];
+  resolved: boolean;
+  resolution?: IssueResolution;
+}
+
+/**
+ * Résolution choisie par l'utilisateur
+ */
+export type IssueResolution = 
+  | { type: 'date_format'; format: DateFormatOption; applyToAll: boolean }
+  | { type: 'scientific_to_number'; confirmed: boolean }
+  | { type: 'scientific_to_text'; confirmed: boolean }
+  | { type: 'ignore_column' };
+
+/**
+ * État de la résolution (pour le wizard)
+ */
+export interface ResolutionState {
+  issues: ResolvableIssue[];
+  allResolved: boolean;
+}

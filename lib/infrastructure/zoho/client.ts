@@ -345,19 +345,52 @@ export class ZohoAnalyticsClient {
     return views.map(mapTable);
   }
 
-  /**
+/**
    * Récupère les colonnes d'une table
+   * Utilise l'endpoint /views/{viewId} avec CONFIG.withInvolvedMetaInfo
    */
   async getColumns(workspaceId: string, viewId: string): Promise<ZohoColumn[]> {
-    interface ColumnsResponse {
-      data: { columns: ZohoColumnResponse[] };
+    // Le bon endpoint est /views/{viewId} avec le paramètre CONFIG
+    const config = { withInvolvedMetaInfo: true };
+    const configEncoded = encodeURIComponent(JSON.stringify(config));
+    
+    interface ViewDetailsResponse {
+      status: string;
+      data: {
+        views: {
+          viewId: string;
+          viewName: string;
+          viewType: string;
+          columns?: Array<{
+            columnName: string;
+            columnDesc?: string;
+            dataType: string;
+            isUnique?: boolean;
+            isLookup?: boolean;
+            isMandatory?: boolean;
+          }>;
+        };
+      };
     }
 
-    const response = await this.request<ColumnsResponse>(
-      `/workspaces/${workspaceId}/views/${viewId}/columns`
+    console.log('[getColumns] Fetching columns for view:', viewId);
+    
+    const response = await this.request<ViewDetailsResponse>(
+      `/views/${viewId}?CONFIG=${configEncoded}`
     );
 
-    return (response.data?.columns || []).map(mapColumn);
+    console.log('[getColumns] Response:', JSON.stringify(response.data?.views, null, 2).substring(0, 500));
+
+    const columns = response.data?.views?.columns || [];
+    
+    return columns.map(col => ({
+      columnName: col.columnName,
+      columnDesc: col.columnDesc,
+      dataType: col.dataType as ZohoColumn['dataType'],
+      isUnique: col.isUnique,
+      isLookup: col.isLookup,
+      isMandatory: col.isMandatory,
+    }));
   }
 
   

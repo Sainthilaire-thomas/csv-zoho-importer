@@ -1,6 +1,6 @@
 ﻿# Structure du projet - csv-zoho-importer
 
-*Genere le 2025-11-30 11:16:46*
+*Genere le 2025-12-01 07:38:20*
 ```
 csv-zoho-importer/
 |-- .vscode/
@@ -29,6 +29,8 @@ csv-zoho-importer/
 |   |   |-- imports/
 |   |   |-- rules/
 |   |   +-- zoho/
+|   |       |-- columns/
+|   |       |   +-- route.ts
 |   |       |-- folders/
 |   |       |   +-- route.ts
 |   |       |-- import/
@@ -83,29 +85,34 @@ csv-zoho-importer/
 |   |   |   |-- mission-001-setup-initial.md
 |   |   |   |-- mission-002-wizard-import.md
 |   |   |   |-- mission-003-api-zoho.md
+|   |   |   |-- mission-004-validation-schema.md
 |   |   |   +-- TEMPLATE-MISSION.md
-|   |   |-- architecture-cible.md
 |   |   |-- base-context.md
 |   |   +-- README.md
+|   |-- image/
+|   |   +-- specs-fonctionnelles/
+|   |       +-- 1764570677131.png
 |   |-- sql/
 |   |   +-- 002-user-zoho-tokens.sql
 |   |-- architecture-cible.md
 |   |-- doc-session.md
 |   |-- project-structure.md
-|   +-- specs-fonctionnelles.md
+|   |-- specs-fonctionnelles.md
+|   +-- specs-validation-avancee.md
 |-- lib/
 |   |-- domain/
 |   |   |-- file-provider/
-|   |   +-- validation/
-|   |       |-- rules/
-|   |       |   |-- base.ts
-|   |       |   |-- date.ts
-|   |       |   |-- email.ts
-|   |       |   |-- index.ts
-|   |       |   |-- number.ts
-|   |       |   +-- required.ts
-|   |       |-- engine.ts
-|   |       +-- index.ts
+|   |   |-- validation/
+|   |   |   |-- rules/
+|   |   |   |   |-- base.ts
+|   |   |   |   |-- date.ts
+|   |   |   |   |-- email.ts
+|   |   |   |   |-- index.ts
+|   |   |   |   |-- number.ts
+|   |   |   |   +-- required.ts
+|   |   |   |-- engine.ts
+|   |   |   +-- index.ts
+|   |   +-- schema-validator.ts
 |   |-- hooks/
 |   |   |-- use-csv-parser.ts
 |   |   |-- use-import.ts

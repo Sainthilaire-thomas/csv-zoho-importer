@@ -5,7 +5,7 @@ import { Check } from 'lucide-react';
 import type { ImportStatus } from '@/types';
 
 interface WizardStep {
-  id: ImportStatus;
+  id: ImportStatus | 'resolving';
   label: string;
   shortLabel: string;
 }
@@ -14,17 +14,28 @@ const WIZARD_STEPS: WizardStep[] = [
   { id: 'selecting', label: 'Sélection du fichier', shortLabel: 'Fichier' },
   { id: 'configuring', label: 'Configuration', shortLabel: 'Config' },
   { id: 'validating', label: 'Validation', shortLabel: 'Validation' },
+  { id: 'resolving', label: 'Résolution', shortLabel: 'Résolution' },
   { id: 'reviewing', label: 'Vérification', shortLabel: 'Revue' },
   { id: 'success', label: 'Terminé', shortLabel: 'Fin' },
 ];
 
 interface WizardProgressProps {
   currentStatus: ImportStatus;
+  isResolving?: boolean;  // Nouvelle prop
   className?: string;
 }
 
-export function WizardProgress({ currentStatus, className = '' }: WizardProgressProps) {
-  const currentIndex = WIZARD_STEPS.findIndex((step) => step.id === currentStatus);
+export function WizardProgress({ currentStatus, isResolving = false, className = '' }: WizardProgressProps) {
+  // Déterminer l'étape effective
+  const getEffectiveStatus = (): ImportStatus | 'resolving' => {
+    if (currentStatus === 'reviewing' && isResolving) {
+      return 'resolving';
+    }
+    return currentStatus;
+  };
+
+  const effectiveStatus = getEffectiveStatus();
+  const currentIndex = WIZARD_STEPS.findIndex((step) => step.id === effectiveStatus);
   
   const effectiveIndex = currentStatus === 'error' 
     ? WIZARD_STEPS.findIndex((step) => step.id === 'reviewing')

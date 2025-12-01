@@ -104,25 +104,6 @@ export interface ParsedRow {
   [key: string]: unknown;
 }
 
-// ==================== ZOHO ====================
-
-export interface ZohoTable {
-  id: string;
-  zohoTableId: string;
-  name: string;
-  displayName: string;
-  workspaceId: string;
-  columns: ZohoColumn[];
-  isActive: boolean;
-}
-
-export interface ZohoColumn {
-  name: string;
-  displayName: string;
-  dataType: 'text' | 'number' | 'date' | 'boolean' | 'email';
-  isRequired: boolean;
-}
-
 // ==================== FILE PROVIDER ====================
 
 export interface FileInfo {
@@ -132,3 +113,34 @@ export interface FileInfo {
   lastModified: Date;
   source: FileSource;
 }
+
+// ==================== RE-EXPORT ZOHO TYPES ====================
+// Pour simplifier les imports dans l'application
+
+export type {
+  // OAuth & Connection
+  ZohoRegion,
+  ZohoTokens,
+  ZohoConnectionStatus,
+  // API Entities
+  ZohoOrganization,
+  ZohoWorkspace,
+  ZohoTable,
+  ZohoFolder,
+  ZohoColumn,
+  ZohoDataType,
+  // Import
+  ZohoImportType,
+  ZohoImportParams,
+  ZohoImportResponse,
+  ZohoImportError,
+  // Schema Validation (Mission 004)
+  FileColumnType,
+  ColumnMapping,
+  TypeWarning,
+  SchemaValidationResult,
+  ZohoTableSchema,
+  // Errors
+  ZohoApiError,
+  ZohoAuthError,
+} from '@/lib/infrastructure/zoho/types';
