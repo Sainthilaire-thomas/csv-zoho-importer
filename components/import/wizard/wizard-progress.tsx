@@ -12,6 +12,7 @@ interface WizardStep {
 
 const WIZARD_STEPS: WizardStep[] = [
   { id: 'selecting', label: 'Sélection du fichier', shortLabel: 'Fichier' },
+  { id: 'profiling', label: 'Profil import', shortLabel: 'Profil' },
   { id: 'configuring', label: 'Configuration', shortLabel: 'Config' },
   { id: 'validating', label: 'Validation', shortLabel: 'Validation' },
   { id: 'resolving', label: 'Résolution', shortLabel: 'Résolution' },

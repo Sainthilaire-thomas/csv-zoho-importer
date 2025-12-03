@@ -3,8 +3,8 @@
 // ==================== IMPORT ====================
 
 export type ImportStatus =
-  | 'idle'
   | 'selecting'
+  | 'profiling'     // ← AJOUTER
   | 'configuring'
   | 'validating'
   | 'reviewing'
@@ -144,3 +144,4 @@ export type {
   ZohoApiError,
   ZohoAuthError,
 } from '@/lib/infrastructure/zoho/types';
+export * from './profiles';

@@ -1,9 +1,10 @@
-﻿// components/import/wizard/import-wizard.tsx
+// components/import/wizard/import-wizard.tsx
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
 import { WizardProgress } from './wizard-progress';
 import { StepSource } from './step-source';
+import { StepProfile } from './step-profile';
 import { StepConfig } from './step-config';
 import { StepValidate } from './step-validate';
 import { StepReview } from './step-review';
@@ -198,6 +199,7 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
 
         setSchemaValidation(schemaResult);
         console.log('Schema validation:', schemaResult.summary);
+        console.log('Auto transformations:', schemaResult.autoTransformations);
         
         // Log des issues détectées
         if (schemaResult.resolvableIssues && schemaResult.resolvableIssues.length > 0) {
@@ -320,6 +322,39 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
           />
         );
 
+      case 'profiling':
+        // Parser le fichier si pas encore fait
+        if (!parsedData && state.config.file) {
+          parseFile(state.config.file).then(result => {
+            setParsedData(result.data);
+          });
+          return <div className="text-center p-8">Analyse du fichier en cours...</div>;
+        }
+        
+        if (!parsedData) {
+          return <div className="text-center p-8">Aucune donnée à analyser</div>;
+        }
+        
+        return (
+          <StepProfile
+            fileData={(parsedData as Record<string, string>[])}
+            fileName={state.config.file?.name || ''}
+            onProfileSelected={(profile, matchResult) => {
+              console.log('Profile selected:', profile.name, matchResult);
+              goToStep('configuring');
+            }}
+            onCreateNewProfile={(detectedColumns) => {
+              console.log('Create new profile:', detectedColumns.length);
+              goToStep('configuring');
+            }}
+            onSkipProfile={(detectedColumns) => {
+              console.log('Skip profile:', detectedColumns.length);
+              goToStep('configuring');
+            }}
+            onBack={goBack}
+          />
+        );
+
       case 'configuring':
         return (
           <>
@@ -386,7 +421,8 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
               }
             }}
             onImport={handleImport}
-          />
+              resolvedIssues={resolvedIssues || []}
+            />
         ) : null;
 
       case 'importing':

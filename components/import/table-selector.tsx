@@ -24,7 +24,7 @@ export function TableSelector({
   const [searchQuery, setSearchQuery] = useState('');
 
   const selectedTable = useMemo(
-    () => tables.find((t) => t.id === selectedTableId),
+    () => tables.find((t) => t.viewId === selectedTableId),
     [tables, selectedTableId]
   );
 
@@ -33,13 +33,13 @@ export function TableSelector({
     const query = searchQuery.toLowerCase();
     return tables.filter(
       (t) =>
-        t.name.toLowerCase().includes(query) ||
-        t.displayName.toLowerCase().includes(query)
+        t.viewName.toLowerCase().includes(query) ||
+        t.viewName.toLowerCase().includes(query)
     );
   }, [tables, searchQuery]);
 
   const handleSelect = (table: ZohoTable) => {
-    onSelect(table.id, table.displayName || table.name);
+    onSelect(table.viewId, table.viewName || table.viewName);
     setIsOpen(false);
     setSearchQuery('');
   };
@@ -72,7 +72,7 @@ export function TableSelector({
           <Table2 className="h-5 w-5 shrink-0 text-gray-400" />
           {selectedTable ? (
             <span className="truncate text-gray-900 dark:text-gray-100">
-              {selectedTable.displayName || selectedTable.name}
+              {selectedTable.viewName || selectedTable.viewName}
             </span>
           ) : (
             <span className="text-gray-500 dark:text-gray-400">Sélectionner une table...</span>
@@ -107,14 +107,14 @@ export function TableSelector({
               ) : (
                 <ul className="py-1">
                   {filteredTables.map((table) => (
-                    <li key={table.id}>
+                    <li key={table.viewId}>
                       <button
                         type="button"
                         onClick={() => handleSelect(table)}
                         className={`
                           w-full flex items-center gap-3 px-3 py-2 text-left transition-colors
                           ${
-                            table.id === selectedTableId
+                            table.viewId === selectedTableId
                               ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
                               : 'hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300'
                           }
@@ -122,9 +122,9 @@ export function TableSelector({
                       >
                         <Table2 className="h-4 w-4 shrink-0 opacity-50" />
                         <div className="min-w-0">
-                          <p className="font-medium truncate">{table.displayName || table.name}</p>
-                          {table.displayName && table.displayName !== table.name && (
-                            <p className="text-xs text-gray-500 truncate">{table.name}</p>
+                          <p className="font-medium truncate">{table.viewName || table.viewName}</p>
+                          {table.viewName && table.viewName !== table.viewName && (
+                            <p className="text-xs text-gray-500 truncate">{table.viewName}</p>
                           )}
                         </div>
                       </button>

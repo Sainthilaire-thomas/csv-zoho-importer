@@ -180,19 +180,21 @@ export interface ZohoColumn {
  * Types de données Zoho
  */
 export type ZohoDataType =
-  | 'PLAIN'           // Texte
-  | 'MULTI_LINE'      // Texte multiligne
-  | 'EMAIL'           // Email
-  | 'URL'             // URL
-  | 'NUMBER'          // Entier
-  | 'POSITIVE_NUMBER' // Entier positif
-  | 'DECIMAL_NUMBER'  // Décimal
-  | 'CURRENCY'        // Monétaire
-  | 'PERCENT'         // Pourcentage
-  | 'DATE'            // Date
-  | 'DATE_TIME'       // Date et heure
-  | 'BOOLEAN'         // Oui/Non
-  | 'AUTO_NUMBER';    // Auto-incrémenté
+  | 'PLAIN'
+  | 'MULTI_LINE'
+  | 'EMAIL'
+  | 'URL'
+  | 'NUMBER'
+  | 'POSITIVE_NUMBER'
+  | 'DECIMAL_NUMBER'
+  | 'CURRENCY'
+  | 'PERCENT'
+  | 'DATE'
+  | 'DATE_TIME'
+  | 'DATE_AS_DATE'   // ✅ AJOUTER CETTE LIGNE
+  | 'BOOLEAN'
+  | 'AUTO_NUMBER'
+  | 'DURATION';
 
 // ==================== IMPORT ====================
 
@@ -343,8 +345,7 @@ export class ZohoAuthError extends Error {
 /**
  * Type de colonne détecté dans le fichier CSV/Excel
  */
-export type FileColumnType = 'string' | 'number' | 'date' | 'email' | 'boolean' | 'unknown';
-
+export type FileColumnType = 'string' | 'number' | 'date' | 'duration' | 'email' | 'boolean' | 'unknown';
 /**
  * Mapping entre une colonne du fichier et une colonne Zoho
  */
@@ -357,7 +358,7 @@ export interface ColumnMapping {
   isCompatible: boolean;        // Types compatibles ?
   isMapped: boolean;            // Correspondance trouvée ?
   isRequired: boolean;          // Colonne requise par Zoho ?
-  transformNeeded?: 'date_format' | 'number_format' | 'trim' | 'none';
+  transformNeeded?: 'date_format' | 'number_format' | 'duration_format' | 'trim' | 'none';
   sampleValues: string[];       // Échantillon de valeurs (max 5)
   confidence: number;           // Score de confiance mapping (0-100)
 }
@@ -386,6 +387,7 @@ export interface SchemaValidationResult {
   extraColumns: string[];       // Colonnes fichier non reconnues
   typeWarnings: TypeWarning[];
   resolvableIssues: ResolvableIssue[];
+  autoTransformations: AutoTransformation[];
   summary: {
     totalFileColumns: number;
     totalZohoColumns: number;
@@ -393,7 +395,9 @@ export interface SchemaValidationResult {
     unmatchedCount: number;
     warningCount: number;
     errorCount: number;
+  
   };
+  
 }
 
 /**
@@ -413,10 +417,10 @@ export interface ZohoTableSchema {
 /**
  * Types de problèmes résolvables par l'utilisateur
  */
-export type ResolvableIssueType = 
-  | 'ambiguous_date_format'    // Date JJ/MM vs MM/JJ
-  | 'scientific_notation'      // Nombre en notation scientifique (1.5E6)
-  | 'type_incompatible';       // Type fichier incompatible avec Zoho
+export type ResolvableIssueType =
+  | 'ambiguous_date_format'      // Date DD/MM vs MM/DD
+  | 'scientific_notation'        // 1E6 → 1000000
+  | 'type_incompatible';
 
 /**
  * Formats de date supportés
@@ -433,7 +437,7 @@ export interface ResolvableIssue {
   message: string;
   sampleValues: string[];
   resolved: boolean;
-  resolution?: IssueResolution;
+  resolution?: IssueResolution;  // ← Changer le type ici
 }
 
 /**
@@ -443,6 +447,9 @@ export type IssueResolution =
   | { type: 'date_format'; format: DateFormatOption; applyToAll: boolean }
   | { type: 'scientific_to_number'; confirmed: boolean }
   | { type: 'scientific_to_text'; confirmed: boolean }
+  | { type: 'decimal_comma_to_dot'; confirmed: boolean }
+  | { type: 'duration_add_seconds'; confirmed: boolean }
+  | { type: 'remove_thousand_separator'; confirmed: boolean }
   | { type: 'ignore_column' };
 
 /**
@@ -451,4 +458,26 @@ export type IssueResolution =
 export interface ResolutionState {
   issues: ResolvableIssue[];
   allResolved: boolean;
+}
+
+/**
+ * Types de transformations automatiques (non bloquantes)
+ */
+export type AutoTransformType =
+  | 'decimal_comma'        // 1234,56 → 1234.56
+  | 'thousand_separator'   // 1 234 567 → 1234567
+  | 'duration_short'       // 23:54 → 23:54:00
+  | 'date_iso';            // DD/MM/YYYY → YYYY-MM-DD (quand non ambigu)
+
+/**
+ * Transformation automatique (informative, non bloquante)
+ */
+export interface AutoTransformation {
+  type: AutoTransformType;
+  column: string;
+  description: string;
+  samples: Array<{
+    before: string;
+    after: string;
+  }>;
 }

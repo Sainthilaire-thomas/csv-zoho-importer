@@ -1,6 +1,6 @@
 ﻿# Structure du projet - csv-zoho-importer
 
-*Genere le 2025-12-01 07:38:20*
+*Genere le 2025-12-02 06:47:56*
 ```
 csv-zoho-importer/
 |-- .vscode/
@@ -55,6 +55,7 @@ csv-zoho-importer/
 |   |   |   |-- index.ts
 |   |   |   |-- step-config.tsx
 |   |   |   |-- step-confirm.tsx
+|   |   |   |-- step-resolve.tsx
 |   |   |   |-- step-review.tsx
 |   |   |   |-- step-source.tsx
 |   |   |   |-- step-validate.tsx
@@ -62,6 +63,7 @@ csv-zoho-importer/
 |   |   |-- file-upload.tsx
 |   |   |-- table-selector.tsx
 |   |   |-- table-selector-accordion.tsx
+|   |   |-- transformation-preview.tsx
 |   |   +-- validation-results.tsx
 |   |-- layout/
 |   |   |-- header.tsx
@@ -95,9 +97,11 @@ csv-zoho-importer/
 |   |-- sql/
 |   |   +-- 002-user-zoho-tokens.sql
 |   |-- architecture-cible.md
+|   |-- architecture-cible-v3.md
 |   |-- doc-session.md
 |   |-- project-structure.md
 |   |-- specs-fonctionnelles.md
+|   |-- specs-profils-import.md
 |   +-- specs-validation-avancee.md
 |-- lib/
 |   |-- domain/
@@ -112,6 +116,7 @@ csv-zoho-importer/
 |   |   |   |   +-- required.ts
 |   |   |   |-- engine.ts
 |   |   |   +-- index.ts
+|   |   |-- data-transformer.ts
 |   |   +-- schema-validator.ts
 |   |-- hooks/
 |   |   |-- use-csv-parser.ts

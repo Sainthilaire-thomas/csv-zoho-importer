@@ -1,5 +1,8 @@
 // lib/domain/schema-validator.ts
-// Version 2 - Avec détection des cas ambigus
+// Version 3 - Avec détection de TOUS les cas nécessitant confirmation
+// ============================================================================
+// PRINCIPE : Zéro boîte noire, tout format transformé doit être confirmé
+// ============================================================================
 
 import type {
   ZohoColumn,
@@ -8,12 +11,13 @@ import type {
   SchemaValidationResult,
   TypeWarning,
   ResolvableIssue,
-  ResolvableIssueType,
+  ResolvableIssueType, 
+  AutoTransformation,
 } from '@/lib/infrastructure/zoho/types';
 
 // ==================== TYPES INTERNES ====================
 
-type FileColumnType = 'string' | 'number' | 'date' | 'email' | 'boolean' | 'unknown';
+type FileColumnType = 'string' | 'number' | 'date' | 'duration' | 'email' | 'boolean' | 'unknown';
 
 interface ZohoSchema {
   viewId: string;
@@ -27,7 +31,7 @@ interface ValidateSchemaParams {
   zohoSchema: ZohoSchema;
 }
 
-// ==================== DÉTECTION DES CAS AMBIGUS ====================
+// ==================== DÉTECTION DES FORMATS ====================
 
 /**
  * Vérifie si une valeur est en notation scientifique
@@ -63,6 +67,282 @@ function isAmbiguousDateFormat(value: string): { isAmbiguous: boolean; day?: num
   // Si second > 12, c'est forcément le jour (format MM/DD)
   return { isAmbiguous: false };
 }
+
+// ============================================================================
+// NOUVEAU : Détection des nombres avec virgule décimale
+// ============================================================================
+
+/**
+ * Vérifie si une valeur est un nombre avec virgule décimale (format français/européen)
+ * Exemples: 1234,56 / 1 234,56 / 1.234,56
+ */
+function hasDecimalComma(value: string): boolean {
+  const trimmed = value.trim();
+  
+  // Pattern: nombre avec virgule comme séparateur décimal
+  // Accepte: 1234,56 | 1 234,56 | 1.234,56 | -1234,56
+  // Le pattern vérifie qu'il y a une virgule suivie de 1-2 chiffres (décimales)
+  
+  // Exclure les cas où la virgule est un séparateur de milliers (1,234,567)
+  if (/^\d{1,3}(,\d{3})+$/.test(trimmed)) {
+    return false; // C'est un format US avec virgule comme milliers
+  }
+  
+  // Détecter: virgule suivie de 1-4 chiffres en fin de chaîne (décimales)
+  return /,\d{1,4}$/.test(trimmed) && /^-?[\d\s.]+,\d{1,4}$/.test(trimmed);
+}
+
+/**
+ * Analyse une colonne pour détecter les nombres avec virgule décimale
+ */
+function detectDecimalComma(sampleValues: string[]): {
+  hasDecimalComma: boolean;
+  samples: string[];
+  transformedSamples: string[];
+} {
+  const samples: string[] = [];
+  const transformedSamples: string[] = [];
+  
+  for (const value of sampleValues) {
+    if (!value || value.trim() === '') continue;
+    
+    if (hasDecimalComma(value) && samples.length < 3) {
+      samples.push(value);
+      // Transformation: remplacer espaces/points milliers, puis virgule → point
+      const transformed = value
+        .replace(/\s/g, '')           // Supprimer espaces
+        .replace(/\.(?=\d{3})/g, '')  // Supprimer points milliers
+        .replace(',', '.');           // Virgule → point
+      transformedSamples.push(transformed);
+    }
+  }
+  
+  return {
+    hasDecimalComma: samples.length > 0,
+    samples,
+    transformedSamples,
+  };
+}
+
+// ============================================================================
+// NOUVEAU : Détection des durées au format court (HH:mm)
+// ============================================================================
+
+/**
+ * Vérifie si une valeur est une durée au format HH:mm (sans secondes)
+ */
+function isShortDuration(value: string): boolean {
+  const trimmed = value.trim();
+  // Pattern: H:mm ou HH:mm (pas de secondes)
+  return /^\d{1,2}:\d{2}$/.test(trimmed);
+}
+
+/**
+ * Vérifie si une valeur est une durée complète HH:mm:ss
+ */
+function isFullDuration(value: string): boolean {
+  const trimmed = value.trim();
+  return /^\d{1,2}:\d{2}:\d{2}$/.test(trimmed);
+}
+
+/**
+ * Analyse une colonne pour détecter les durées au format court
+ */
+function detectShortDuration(sampleValues: string[]): {
+  hasShortDuration: boolean;
+  samples: string[];
+  transformedSamples: string[];
+} {
+  const samples: string[] = [];
+  const transformedSamples: string[] = [];
+  let hasFullDuration = false;
+  
+  for (const value of sampleValues) {
+    if (!value || value.trim() === '') continue;
+    
+    // Vérifier si la colonne contient déjà des durées complètes
+    if (isFullDuration(value)) {
+      hasFullDuration = true;
+    }
+    
+    if (isShortDuration(value) && samples.length < 3) {
+      samples.push(value);
+      // Transformation: ajouter :00 pour les secondes
+      const parts = value.split(':');
+      const transformed = `${parts[0].padStart(2, '0')}:${parts[1]}:00`;
+      transformedSamples.push(transformed);
+    }
+  }
+  
+  // Ne signaler que si TOUTES les durées sont au format court
+  // (pas de mélange avec des durées complètes)
+  return {
+    hasShortDuration: samples.length > 0 && !hasFullDuration,
+    samples,
+    transformedSamples,
+  };
+}
+
+// ============================================================================
+// NOUVEAU : Détection des espaces comme séparateurs de milliers
+// ============================================================================
+
+/**
+ * Vérifie si une valeur contient des espaces comme séparateurs de milliers
+ * Exemples: 1 234 567 / 12 345
+ */
+function hasThousandSeparatorSpace(value: string): boolean {
+  const trimmed = value.trim();
+  // Pattern: chiffres séparés par des espaces (groupes de 3)
+  // Accepte: 1 234 | 1 234 567 | 12 345,67
+  return /^\d{1,3}(\s\d{3})+([,\.]\d+)?$/.test(trimmed);
+}
+
+/**
+ * Analyse une colonne pour détecter les espaces séparateurs de milliers
+ */
+function detectThousandSeparator(sampleValues: string[]): {
+  hasThousandSeparator: boolean;
+  samples: string[];
+  transformedSamples: string[];
+} {
+  const samples: string[] = [];
+  const transformedSamples: string[] = [];
+  
+  for (const value of sampleValues) {
+    if (!value || value.trim() === '') continue;
+    
+    if (hasThousandSeparatorSpace(value) && samples.length < 3) {
+      samples.push(value);
+      // Transformation: supprimer les espaces, normaliser la virgule
+      const transformed = value
+        .replace(/\s/g, '')
+        .replace(',', '.');
+      transformedSamples.push(transformed);
+    }
+  }
+  
+  return {
+    hasThousandSeparator: samples.length > 0,
+    samples,
+    transformedSamples,
+  };
+}
+
+
+// ============================================================================
+// DÉTECTION DES TRANSFORMATIONS AUTOMATIQUES (🔄 non bloquant)
+// ============================================================================
+
+export function detectAutoTransformations(
+  fileHeaders: string[],
+  sampleData: string[][],
+  matchedColumns: ColumnMapping[]
+): AutoTransformation[] {
+  const transformations: AutoTransformation[] = [];
+
+  fileHeaders.forEach((fileCol, index) => {
+    const sampleValues = sampleData
+      .slice(0, 100)
+      .map(row => row[index] || '')
+      .filter(v => v.trim() !== '');
+
+    const mapping = matchedColumns.find(m => m.fileColumn === fileCol);
+    if (!mapping || !mapping.isMapped) return;
+
+    const detectedType = detectColumnType(sampleValues);
+
+    // 1. Nombres avec virgule décimale → automatique
+    if (mapping.fileType === 'number' || detectedType === 'number') {
+      const decimalResult = detectDecimalComma(sampleValues);
+      
+      if (decimalResult.hasDecimalComma) {
+        transformations.push({
+          type: 'decimal_comma',
+          column: fileCol,
+          description: 'Virgule décimale → point (format universel)',
+          samples: decimalResult.samples.map((v, i) => ({
+            before: v,
+            after: decimalResult.transformedSamples[i],
+          })),
+        });
+      }
+      
+      // Espaces séparateurs de milliers → automatique
+      const thousandResult = detectThousandSeparator(sampleValues);
+      
+      if (thousandResult.hasThousandSeparator && !decimalResult.hasDecimalComma) {
+        transformations.push({
+          type: 'thousand_separator',
+          column: fileCol,
+          description: 'Suppression des espaces séparateurs de milliers',
+          samples: thousandResult.samples.map((v, i) => ({
+            before: v,
+            after: thousandResult.transformedSamples[i],
+          })),
+        });
+      }
+    }
+
+    // 2. Durées au format court → automatique
+    if (mapping.fileType === 'duration' || detectedType === 'duration' || 
+        mapping.zohoType === 'DURATION') {
+      const durationResult = detectShortDuration(sampleValues);
+      
+      if (durationResult.hasShortDuration) {
+        transformations.push({
+          type: 'duration_short',
+          column: fileCol,
+          description: 'Ajout des secondes (HH:mm → HH:mm:ss)',
+          samples: durationResult.samples.map((v, i) => ({
+            before: v,
+            after: durationResult.transformedSamples[i],
+          })),
+        });
+      }
+    }
+
+    // 3. Dates non ambiguës (jour > 12) → automatique
+    if (mapping.fileType === 'date' || detectedType === 'date') {
+      const nonAmbiguousSamples: Array<{ before: string; after: string }> = [];
+      let hasAmbiguous = false;
+      
+      for (const value of sampleValues) {
+        const trimmed = value.trim();
+        const match = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+        
+        if (match) {
+          const first = parseInt(match[1], 10);
+          const second = parseInt(match[2], 10);
+          const year = match[3];
+          
+          if (first <= 12 && second <= 12) {
+            hasAmbiguous = true;
+          } else if (first > 12 && nonAmbiguousSamples.length < 3) {
+            // Forcément DD/MM/YYYY
+            nonAmbiguousSamples.push({
+              before: trimmed,
+              after: `${year}-${second.toString().padStart(2, '0')}-${first.toString().padStart(2, '0')}`,
+            });
+          }
+        }
+      }
+      
+      // Seulement si TOUTES les dates sont non-ambiguës
+      if (nonAmbiguousSamples.length > 0 && !hasAmbiguous) {
+        transformations.push({
+          type: 'date_iso',
+          column: fileCol,
+          description: 'Conversion vers format ISO (YYYY-MM-DD)',
+          samples: nonAmbiguousSamples,
+        });
+      }
+    }
+  });
+
+  return transformations;
+}
+// ==================== DÉTECTIONS EXISTANTES (conservées) ====================
 
 /**
  * Analyse une colonne pour détecter si elle contient des dates ambiguës
@@ -137,6 +417,11 @@ function detectValueType(value: string): FileColumnType {
     return 'string'; // Par défaut string, l'utilisateur décidera
   }
   
+  // Durée (HH:mm ou HH:mm:ss)
+  if (/^\d{1,2}:\d{2}(:\d{2})?$/.test(trimmed)) {
+    return 'duration';
+  }
+  
   // Date (formats courants)
   const datePatterns = [
     /^\d{2}\/\d{2}\/\d{4}$/,           // DD/MM/YYYY ou MM/DD/YYYY
@@ -181,6 +466,7 @@ export function detectColumnType(sampleValues: string[]): FileColumnType {
     string: 0,
     number: 0,
     date: 0,
+    duration: 0,
     email: 0,
     boolean: 0,
     unknown: 0,
@@ -211,9 +497,10 @@ export function detectColumnType(sampleValues: string[]): FileColumnType {
  */
 function isTypeCompatible(fileType: FileColumnType, zohoType: ZohoDataType): boolean {
   const compatibilityMap: Record<FileColumnType, ZohoDataType[]> = {
-    string: ['PLAIN', 'MULTI_LINE', 'URL', 'EMAIL', 'NUMBER', 'CURRENCY', 'PERCENT', 'DATE', 'DATE_TIME'],
+    string: ['PLAIN', 'MULTI_LINE', 'URL', 'EMAIL', 'NUMBER', 'CURRENCY', 'PERCENT', 'DATE', 'DATE_TIME', 'DATE_AS_DATE', 'DURATION'],
     number: ['NUMBER', 'POSITIVE_NUMBER', 'DECIMAL_NUMBER', 'CURRENCY', 'PERCENT', 'PLAIN'],
-    date: ['DATE', 'DATE_TIME', 'PLAIN'],
+    date: ['DATE', 'DATE_TIME', 'DATE_AS_DATE', 'PLAIN'],
+    duration: ['DURATION', 'PLAIN', 'NUMBER'],
     email: ['EMAIL', 'PLAIN'],
     boolean: ['PLAIN', 'NUMBER', 'BOOLEAN'],
     unknown: ['PLAIN', 'MULTI_LINE'],
@@ -228,9 +515,13 @@ function isTypeCompatible(fileType: FileColumnType, zohoType: ZohoDataType): boo
 function getTransformNeeded(
   fileType: FileColumnType,
   zohoType: ZohoDataType
-): 'date_format' | 'number_format' | 'trim' | 'none' {
-  if (fileType === 'date' && (zohoType === 'DATE' || zohoType === 'DATE_TIME')) {
+): 'date_format' | 'number_format' | 'duration_format' | 'trim' | 'none' {
+  if (fileType === 'date' && (zohoType === 'DATE' || zohoType === 'DATE_TIME' || zohoType === 'DATE_AS_DATE')) {
     return 'date_format';
+  }
+  
+  if (fileType === 'duration' && zohoType === 'DURATION') {
+    return 'duration_format';
   }
   
   if (fileType === 'number' && ['NUMBER', 'CURRENCY', 'PERCENT', 'DECIMAL_NUMBER', 'POSITIVE_NUMBER'].includes(zohoType)) {
@@ -329,6 +620,9 @@ function generateIssueId(): string {
 
 /**
  * Détecte tous les problèmes résolubles dans les données
+ * ============================================================================
+ * VERSION 3 : Détecte TOUS les formats nécessitant confirmation
+ * ============================================================================
  */
 export function detectResolvableIssues(
   fileHeaders: string[],
@@ -344,9 +638,12 @@ export function detectResolvableIssues(
       .filter(v => v.trim() !== '');
     
     const mapping = matchedColumns.find(m => m.fileColumn === fileCol);
+    const detectedType = detectColumnType(sampleValues);
     
-    // 1. Vérifier les dates ambiguës
-    if (mapping?.fileType === 'date' || detectColumnType(sampleValues) === 'date') {
+    // ========================================================================
+    // 1. Dates ambiguës (DD/MM vs MM/DD)
+    // ========================================================================
+    if (mapping?.fileType === 'date' || detectedType === 'date') {
       const { hasAmbiguous, ambiguousSamples } = hasAmbiguousDates(sampleValues);
       
       if (hasAmbiguous) {
@@ -361,11 +658,12 @@ export function detectResolvableIssues(
       }
     }
     
-    // 2. Vérifier la notation scientifique
+    // ========================================================================
+    // 2. Notation scientifique (1E6 → 1000000)
+    // ========================================================================
     const { hasScientific, scientificSamples } = hasScientificNotation(sampleValues);
     
     if (hasScientific) {
-      // Convertir la notation en nombre pour montrer le résultat
       const convertedExamples = scientificSamples.map(v => {
         const num = parseFloat(v);
         return `${v} → ${num.toLocaleString('fr-FR')}`;
@@ -375,15 +673,20 @@ export function detectResolvableIssues(
         id: generateIssueId(),
         type: 'scientific_notation',
         column: fileCol,
-        message: `Notation scientifique détectée. Interpréter comme nombre ou garder comme texte ?`,
+        message: `Notation scientifique détectée. Ces valeurs seront développées en nombres complets.`,
         sampleValues: convertedExamples,
         resolved: false,
       });
     }
     
-    // 3. Vérifier les incompatibilités de type non résolubles automatiquement
+   
+    
+   
+    
+    // ========================================================================
+    // 5. Incompatibilités de type non résolubles automatiquement
+    // ========================================================================
     if (mapping && !mapping.isCompatible && mapping.zohoType) {
-      // Seulement si c'est vraiment incompatible (pas juste un warning)
       const isReallyIncompatible = 
         (mapping.fileType === 'string' && mapping.zohoType === 'NUMBER') ||
         (mapping.fileType === 'date' && mapping.zohoType === 'NUMBER');
@@ -491,10 +794,13 @@ export function validateSchema(params: ValidateSchemaParams): SchemaValidationRe
     }
   });
 
-  // 3. Détecter les problèmes résolubles
+  // 3. Détecter les transformations automatiques (🔄 informatif)
+  const autoTransformations = detectAutoTransformations(fileHeaders, sampleData, matchedColumns);
+  
+  // 4. Détecter les problèmes résolubles (⚠️ bloquant)
   const resolvableIssues = detectResolvableIssues(fileHeaders, sampleData, matchedColumns);
   
-  // 4. Calculer le résumé
+  // 5. Calculer le résumé
   const errorCount = typeWarnings.filter(w => w.severity === 'error').length;
   const warningCount = typeWarnings.filter(w => w.severity === 'warning').length;
   const unresolvedIssuesCount = resolvableIssues.filter(i => !i.resolved).length;
@@ -514,7 +820,7 @@ export function validateSchema(params: ValidateSchemaParams): SchemaValidationRe
   // canProceed = false si erreurs OU si des issues non résolues existent
   const canProceed = errorCount === 0 && unresolvedIssuesCount === 0;
 
-  return {
+   return {
     isValid,
     hasWarnings,
     canProceed,
@@ -523,6 +829,7 @@ export function validateSchema(params: ValidateSchemaParams): SchemaValidationRe
     extraColumns,
     typeWarnings,
     resolvableIssues,
+    autoTransformations,  // ← AJOUTER
     summary,
   };
 }

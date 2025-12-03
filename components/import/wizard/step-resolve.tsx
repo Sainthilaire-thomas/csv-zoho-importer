@@ -1,15 +1,22 @@
 // components/import/wizard/step-resolve.tsx
+// VERSION 4 - Seulement les issues bloquantes (dates ambiguës, notation scientifique, types incompatibles)
 'use client';
 
 import { useState } from 'react';
-import { AlertTriangle, Calendar, Hash, XCircle, CheckCircle2, HelpCircle } from 'lucide-react';
+import { 
+  AlertTriangle, 
+  Calendar, 
+  Hash, 
+  XCircle, 
+  CheckCircle2, 
+  HelpCircle
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import type { 
   ResolvableIssue, 
   IssueResolution, 
   DateFormatOption,
-  ResolutionState 
 } from '@/lib/infrastructure/zoho/types';
 
 // ==================== TYPES ====================
@@ -20,10 +27,10 @@ interface StepResolveProps {
   onBack: () => void;
 }
 
-// ==================== COMPOSANTS INDIVIDUELS ====================
+// ==================== COMPOSANTS DE RÉSOLUTION ====================
 
 /**
- * Résolution pour les dates ambiguës
+ * Résolution pour les dates ambiguës (DD/MM vs MM/DD)
  */
 function DateFormatResolver({ 
   issue, 
@@ -35,7 +42,6 @@ function DateFormatResolver({
   const [selectedFormat, setSelectedFormat] = useState<DateFormatOption | null>(null);
   const [applyToAll, setApplyToAll] = useState(true);
 
-  // Parser l'exemple pour montrer les deux interprétations
   const sampleValue = issue.sampleValues[0] || '05/03/2025';
   const parts = sampleValue.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
   
@@ -44,7 +50,6 @@ function DateFormatResolver({
   
   if (parts) {
     const [, first, second, year] = parts;
-    // Format DD/MM/YYYY → jour = first, mois = second
     const ddmmDate = new Date(parseInt(year), parseInt(second) - 1, parseInt(first));
     ddmmInterpretation = ddmmDate.toLocaleDateString('fr-FR', { 
       day: 'numeric', 
@@ -52,7 +57,6 @@ function DateFormatResolver({
       year: 'numeric' 
     });
     
-    // Format MM/DD/YYYY → mois = first, jour = second
     const mmddDate = new Date(parseInt(year), parseInt(first) - 1, parseInt(second));
     mmddInterpretation = mmddDate.toLocaleDateString('fr-FR', { 
       day: 'numeric', 
@@ -75,7 +79,7 @@ function DateFormatResolver({
     <div className="space-y-4">
       <div className="bg-amber-50 dark:bg-amber-950/30 p-3 rounded-lg">
         <p className="text-sm text-amber-800 dark:text-amber-200">
-          <strong>Exemple :</strong> "{sampleValue}"
+          <strong>Exemple :</strong> &quot;{sampleValue}&quot;
         </p>
       </div>
 
@@ -92,7 +96,7 @@ function DateFormatResolver({
           <div>
             <p className="font-medium">JJ/MM/AAAA (format français)</p>
             <p className="text-sm text-gray-500">
-              "{sampleValue}" → <strong>{ddmmInterpretation}</strong>
+              &quot;{sampleValue}&quot; → <strong>{ddmmInterpretation}</strong>
             </p>
           </div>
         </label>
@@ -109,7 +113,7 @@ function DateFormatResolver({
           <div>
             <p className="font-medium">MM/JJ/AAAA (format américain)</p>
             <p className="text-sm text-gray-500">
-              "{sampleValue}" → <strong>{mmddInterpretation}</strong>
+              &quot;{sampleValue}&quot; → <strong>{mmddInterpretation}</strong>
             </p>
           </div>
         </label>
@@ -136,7 +140,7 @@ function DateFormatResolver({
 }
 
 /**
- * Résolution pour la notation scientifique
+ * Résolution pour la notation scientifique (1E6 → 1000000)
  */
 function ScientificNotationResolver({ 
   issue, 
@@ -159,9 +163,9 @@ function ScientificNotationResolver({
     <div className="space-y-4">
       <div className="bg-blue-50 dark:bg-blue-950/30 p-3 rounded-lg">
         <p className="text-sm text-blue-800 dark:text-blue-200 mb-2">
-          <strong>Exemples détectés :</strong>
+          <strong>Transformations prévues :</strong>
         </p>
-        <ul className="text-sm text-blue-700 dark:text-blue-300 space-y-1">
+        <ul className="text-sm text-blue-700 dark:text-blue-300 space-y-1 font-mono">
           {issue.sampleValues.map((v, i) => (
             <li key={i}>• {v}</li>
           ))}
@@ -179,9 +183,9 @@ function ScientificNotationResolver({
             className="mt-1"
           />
           <div>
-            <p className="font-medium">Convertir en nombre</p>
+            <p className="font-medium">Convertir en nombre (recommandé)</p>
             <p className="text-sm text-gray-500">
-              La notation sera convertie en valeur numérique (ex: 1.5E6 → 1 500 000)
+              La notation sera développée (ex: 1.5E6 → 1 500 000)
             </p>
           </div>
         </label>
@@ -198,7 +202,7 @@ function ScientificNotationResolver({
           <div>
             <p className="font-medium">Garder comme texte</p>
             <p className="text-sm text-gray-500">
-              La valeur sera importée telle quelle (ex: "1.5E6")
+              La valeur sera importée telle quelle (ex: &quot;1.5E6&quot;)
             </p>
           </div>
         </label>
@@ -233,14 +237,14 @@ function TypeIncompatibleResolver({
         </p>
         <ul className="text-sm text-red-700 dark:text-red-300 space-y-1">
           {issue.sampleValues.map((v, i) => (
-            <li key={i}>• "{v}"</li>
+            <li key={i}>• &quot;{v}&quot;</li>
           ))}
         </ul>
       </div>
 
       <p className="text-sm text-gray-600 dark:text-gray-400">
         Cette colonne contient des données incompatibles avec le type attendu par Zoho.
-        Vous pouvez choisir d'ignorer cette colonne lors de l'import.
+        Vous pouvez choisir d&apos;ignorer cette colonne lors de l&apos;import.
       </p>
 
       <div className="flex gap-3">
@@ -255,6 +259,8 @@ function TypeIncompatibleResolver({
     </div>
   );
 }
+
+// ==================== CARTE ISSUE ====================
 
 /**
  * Carte pour une issue individuelle
@@ -294,6 +300,19 @@ function IssueCard({
     }
   };
 
+  const getBorderColor = () => {
+    switch (issue.type) {
+      case 'ambiguous_date_format':
+        return 'border-amber-200 dark:border-amber-800';
+      case 'scientific_notation':
+        return 'border-blue-200 dark:border-blue-800';
+      case 'type_incompatible':
+        return 'border-red-200 dark:border-red-800';
+      default:
+        return 'border-gray-200 dark:border-gray-800';
+    }
+  };
+
   const handleResolve = (resolution: IssueResolution) => {
     onResolve(issue.id, resolution);
   };
@@ -319,7 +338,7 @@ function IssueCard({
   }
 
   return (
-    <Card className="border-amber-200 dark:border-amber-800">
+    <Card className={getBorderColor()}>
       <CardHeader className="pb-3">
         <div className="flex items-center gap-3">
           <div className="flex items-center justify-center w-8 h-8 rounded-full bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300 font-semibold text-sm">
@@ -417,17 +436,17 @@ export function StepResolve({ issues, onResolve, onBack }: StepResolveProps) {
             <AlertTriangle className="w-6 h-6 text-amber-500" />
             <div className="flex-1">
               <h3 className="font-semibold">
-                {totalCount} problème{totalCount > 1 ? 's' : ''} à résoudre
+                {totalCount} format{totalCount > 1 ? 's' : ''} à confirmer
               </h3>
               <p className="text-sm text-gray-500">
-                Veuillez résoudre ces problèmes avant de continuer l'import.
+                Ces formats sont ambigus et nécessitent votre confirmation.
               </p>
             </div>
             <div className="text-right">
               <div className="text-2xl font-bold text-amber-600">
                 {resolvedCount}/{totalCount}
               </div>
-              <div className="text-xs text-gray-500">résolus</div>
+              <div className="text-xs text-gray-500">confirmés</div>
             </div>
           </div>
 
@@ -463,7 +482,7 @@ export function StepResolve({ issues, onResolve, onBack }: StepResolveProps) {
           disabled={!allResolved}
           className="flex-1"
         >
-          {allResolved ? 'Continuer →' : `Résoudre ${totalCount - resolvedCount} problème(s) restant(s)`}
+          {allResolved ? 'Continuer →' : `Confirmer ${totalCount - resolvedCount} format(s) restant(s)`}
         </Button>
       </div>
     </div>

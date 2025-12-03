@@ -1,4 +1,5 @@
 // lib/hooks/use-import.ts
+// VERSION MODIFIÉE - Avec étape Profil
 'use client';
 
 import { useReducer, useCallback, useMemo } from 'react';
@@ -167,6 +168,10 @@ function importReducer(state: ImportState, action: ImportAction): ImportState {
       const targetStatus = action.payload;
       
       // Vérifications de transition
+      // MODIFIÉ : profiling nécessite un fichier
+      if (targetStatus === 'profiling' && !state.config.file) {
+        return state; // Bloquer si pas de fichier
+      }
       if (targetStatus === 'configuring' && !state.config.file) {
         return state; // Bloquer si pas de fichier
       }
@@ -226,9 +231,12 @@ export interface UseImportReturn {
   hasErrors: boolean;
 }
 
-// Ordre des étapes
+// ============================================================================
+// MODIFIÉ : Ordre des étapes avec 'profiling'
+// ============================================================================
 const STEP_ORDER: ImportStatus[] = [
   'selecting',
+  'profiling',     // ← NOUVEAU
   'configuring',
   'validating',
   'reviewing',
@@ -301,10 +309,16 @@ export function useImport(): UseImportReturn {
     return index === -1 ? 0 : index;
   }, [state.status]);
 
+  // ============================================================================
+  // MODIFIÉ : canGoNext avec étape profiling
+  // ============================================================================
   const canGoNext = useMemo(() => {
     switch (state.status) {
       case 'selecting':
         return !!state.config.file;
+      case 'profiling':
+        // L'étape profil gère sa propre navigation
+        return true;
       case 'configuring':
         return !!state.config.tableId;
       case 'reviewing':
@@ -314,15 +328,24 @@ export function useImport(): UseImportReturn {
     }
   }, [state.status, state.config.file, state.config.tableId, state.validation]);
 
+  // ============================================================================
+  // MODIFIÉ : canGoBack avec étape profiling
+  // ============================================================================
   const canGoBack = useMemo(() => {
-    return ['configuring', 'reviewing', 'error'].includes(state.status);
+    return ['profiling', 'configuring', 'reviewing', 'error'].includes(state.status);
   }, [state.status]);
 
+  // ============================================================================
+  // MODIFIÉ : goNext avec étape profiling
+  // ============================================================================
   const goNext = useCallback(() => {
     if (!canGoNext) return;
 
     switch (state.status) {
       case 'selecting':
+          goToStep('profiling');
+        break;
+      case 'profiling':
         goToStep('configuring');
         break;
       case 'configuring':
@@ -334,12 +357,18 @@ export function useImport(): UseImportReturn {
     }
   }, [state.status, canGoNext, goToStep]);
 
+  // ============================================================================
+  // MODIFIÉ : goBack avec étape profiling
+  // ============================================================================
   const goBack = useCallback(() => {
     if (!canGoBack) return;
 
     switch (state.status) {
+      case 'profiling':
+        goToStep('selecting');  // ← NOUVEAU
+        break;
       case 'configuring':
-        goToStep('selecting');
+        goToStep('configuring');  // ← MODIFIÉ : retour vers profiling
         break;
       case 'reviewing':
       case 'error':
