@@ -1,6 +1,6 @@
 ﻿# Structure du projet - csv-zoho-importer
 
-*Genere le 2025-12-02 06:47:56*
+*Genere le 2025-12-04 09:44:12*
 ```
 csv-zoho-importer/
 |-- .vscode/
@@ -27,6 +27,11 @@ csv-zoho-importer/
 |   |   |   +-- validate/
 |   |   |       +-- route.ts
 |   |   |-- imports/
+|   |   |-- profiles/
+|   |   |   |-- [id]/
+|   |   |   |-- match/
+|   |   |   |   +-- route.ts
+|   |   |   +-- route.ts
 |   |   |-- rules/
 |   |   +-- zoho/
 |   |       |-- columns/
@@ -55,6 +60,7 @@ csv-zoho-importer/
 |   |   |   |-- index.ts
 |   |   |   |-- step-config.tsx
 |   |   |   |-- step-confirm.tsx
+|   |   |   |-- step-profile.tsx
 |   |   |   |-- step-resolve.tsx
 |   |   |   |-- step-review.tsx
 |   |   |   |-- step-source.tsx
@@ -88,6 +94,8 @@ csv-zoho-importer/
 |   |   |   |-- mission-002-wizard-import.md
 |   |   |   |-- mission-003-api-zoho.md
 |   |   |   |-- mission-004-validation-schema.md
+|   |   |   |-- mission-004-validation-schema-PAUSE.md
+|   |   |   |-- mission-005-profils-import.md
 |   |   |   +-- TEMPLATE-MISSION.md
 |   |   |-- base-context.md
 |   |   +-- README.md
@@ -105,7 +113,13 @@ csv-zoho-importer/
 |   +-- specs-validation-avancee.md
 |-- lib/
 |   |-- domain/
+|   |   |-- detection/
+|   |   |   |-- index.ts
+|   |   |   +-- type-detector.ts
 |   |   |-- file-provider/
+|   |   |-- profile/
+|   |   |   |-- index.ts
+|   |   |   +-- profile-manager.ts
 |   |   |-- validation/
 |   |   |   |-- rules/
 |   |   |   |   |-- base.ts
@@ -142,7 +156,8 @@ csv-zoho-importer/
 |-- scripts/
 |   +-- generate-tree.ps1
 |-- types/
-|   +-- index.ts
+|   |-- index.ts
+|   +-- profiles.ts
 |-- .env.local
 |-- .gitignore
 |-- eslint.config.mjs
@@ -154,7 +169,8 @@ csv-zoho-importer/
 |-- postcss.config.mjs
 |-- README.md
 |-- tailwind.config.ts
-+-- tsconfig.json
+|-- tsconfig.json
++-- tsconfig.tsbuildinfo
 ```
 
 ## Fichiers cles

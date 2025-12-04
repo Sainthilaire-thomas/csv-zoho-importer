@@ -1,4 +1,4 @@
-// components/import/wizard/import-wizard.tsx
+﻿// components/import/wizard/import-wizard.tsx
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
@@ -19,6 +19,7 @@ import { validateSchema } from '@/lib/domain/schema-validator';
 import { RotateCcw } from 'lucide-react';
 import type { FileSource, TableValidationConfig } from '@/types';
 import type { SchemaValidationResult, ZohoTableSchema, ResolvableIssue } from '@/lib/infrastructure/zoho/types';
+import type { ImportProfile, ProfileMatchResult, DetectedColumn } from '@/types/profiles';
 import Papa from 'papaparse';
 
 interface ZohoWorkspace {
@@ -29,6 +30,8 @@ interface ZohoWorkspace {
 interface ImportWizardProps {
   className?: string;
 }
+
+type ProfileMode = 'existing' | 'new' | 'skip';
 
 export function ImportWizard({ className = '' }: ImportWizardProps) {
   const {
@@ -70,14 +73,22 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
   const [workspacesError, setWorkspacesError] = useState<string | null>(null);
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string>('');
 
-  // Données parsées et validation de schéma
+  // Donnees parsees et validation de schema
   const [parsedData, setParsedData] = useState<Record<string, unknown>[] | null>(null);
   const [schemaValidation, setSchemaValidation] = useState<SchemaValidationResult | null>(null);
   const [zohoSchema, setZohoSchema] = useState<ZohoTableSchema | null>(null);
 
-  // Issues résolues par l'utilisateur
+  // Issues resolues par l utilisateur
   const [resolvedIssues, setResolvedIssues] = useState<ResolvableIssue[] | null>(null);
   const [issuesResolved, setIssuesResolved] = useState(false);
+
+  // ==========================================================================
+  // Etat du profil
+  // ==========================================================================
+  const [profileMode, setProfileMode] = useState<ProfileMode>('skip');
+  const [selectedProfile, setSelectedProfile] = useState<ImportProfile | null>(null);
+  const [selectedMatchResult, setSelectedMatchResult] = useState<ProfileMatchResult | null>(null);
+  const [detectedColumns, setDetectedColumns] = useState<DetectedColumn[]>([]);
 
   // Charger les workspaces au montage
   useEffect(() => {
@@ -109,6 +120,17 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
     fetchWorkspaces();
   }, []);
 
+  // ==========================================================================
+  // Pre-remplir config si profil existant selectionne
+  // ==========================================================================
+  useEffect(() => {
+    if (selectedProfile && profileMode === 'existing') {
+      setSelectedWorkspaceId(selectedProfile.workspaceId);
+      setTable(selectedProfile.viewId, selectedProfile.viewName);
+      setImportMode(selectedProfile.defaultImportMode);
+    }
+  }, [selectedProfile, profileMode, setTable, setImportMode]);
+
   const handleSourceChange = useCallback((source: FileSource) => {
     if (source === 'sftp') {
       return;
@@ -124,7 +146,7 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
     setIssuesResolved(false);
   }, [setTable]);
 
-  // Récupérer le schéma Zoho d'une table
+  // Recuperer le schema Zoho d une table
   const fetchZohoSchema = useCallback(async (workspaceId: string, viewId: string, viewName: string): Promise<ZohoTableSchema | null> => {
     try {
       console.log('[Schema] Fetching schema for', viewId);
@@ -161,7 +183,7 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
 
     startValidation();
     
-    // Reset les états de résolution
+    // Reset les etats de resolution
     setResolvedIssues(null);
     setIssuesResolved(false);
 
@@ -174,18 +196,18 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
       setParsedData(parseResult.data);
       updateProgress({ phase: 'parsing', current: 100, total: 100, percentage: 20 });
 
-      // Phase 2: Récupération du schéma Zoho
+      // Phase 2: Recuperation du schema Zoho
       updateProgress({ phase: 'validating', current: 20, total: 100, percentage: 30 });
       console.log('Recuperation du schema Zoho...');
       const schema = await fetchZohoSchema(selectedWorkspaceId, state.config.tableId, state.config.tableName);
       setZohoSchema(schema);
 
-      // Phase 3: Validation du schéma (correspondance colonnes)
+      // Phase 3: Validation du schema (correspondance colonnes)
       if (schema && schema.columns.length > 0) {
         updateProgress({ phase: 'validating', current: 40, total: 100, percentage: 50 });
         console.log('Validation du schema...');
 
-        // Extraire les headers et données pour la validation
+        // Extraire les headers et donnees pour la validation
         const headers = parseResult.data.length > 0 ? Object.keys(parseResult.data[0]) : [];
         const sampleData = parseResult.data.slice(0, 100).map(row =>
           headers.map(h => String((row as Record<string, unknown>)[h] ?? ''))
@@ -195,15 +217,16 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
           fileHeaders: headers,
           sampleData,
           zohoSchema: schema,
+          profile: selectedProfile || undefined,
         });
 
         setSchemaValidation(schemaResult);
         console.log('Schema validation:', schemaResult.summary);
         console.log('Auto transformations:', schemaResult.autoTransformations);
         
-        // Log des issues détectées
+        // Log des issues detectees
         if (schemaResult.resolvableIssues && schemaResult.resolvableIssues.length > 0) {
-          console.log('Issues à résoudre:', schemaResult.resolvableIssues.length);
+          console.log('Issues a resoudre:', schemaResult.resolvableIssues.length);
           schemaResult.resolvableIssues.forEach(issue => {
             console.log(`  - ${issue.type}: ${issue.column} - ${issue.message}`);
           });
@@ -213,7 +236,7 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
         setSchemaValidation(null);
       }
 
-      // Phase 4: Validation des données (règles métier)
+      // Phase 4: Validation des donnees (regles metier)
       updateProgress({ phase: 'validating', current: 60, total: 100, percentage: 70 });
       const validationConfig: TableValidationConfig = {
         tableId: state.config.tableId,
@@ -233,6 +256,189 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
       );
     }
   }, [state.config.file, state.config.tableId, state.config.tableName, selectedWorkspaceId, startValidation, updateProgress, parseFile, fetchZohoSchema, validate, setValidationResult, setValidationError]);
+
+  // ==========================================================================
+  // Fonction pour sauvegarder ou mettre a jour le profil
+  // ==========================================================================
+  const saveOrUpdateProfile = useCallback(async () => {
+    const workspace = workspaces.find(w => w.id === selectedWorkspaceId);
+    if (!workspace) {
+      console.error('Workspace non trouve');
+      return;
+    }
+
+    if (profileMode === 'existing' && selectedProfile) {
+      console.log('Mise a jour du profil existant:', selectedProfile.id);
+
+      const updates: Record<string, unknown> = {
+        lastUsedAt: new Date().toISOString(),
+        incrementUseCount: true,
+      };
+
+      if (selectedMatchResult) {
+        const newAliases: Record<string, string[]> = {};
+        
+        for (const mapping of selectedMatchResult.mappings) {
+          if (mapping.status === 'similar' && mapping.profileColumn) {
+            const zohoCol = mapping.profileColumn.zohoColumn;
+            if (!mapping.profileColumn.acceptedNames.includes(mapping.fileColumn)) {
+              if (!newAliases[zohoCol]) newAliases[zohoCol] = [];
+              newAliases[zohoCol].push(mapping.fileColumn);
+            }
+          }
+        }
+
+        if (Object.keys(newAliases).length > 0) {
+          updates.newAliases = newAliases;
+        }
+      }
+
+      if (resolvedIssues && resolvedIssues.length > 0) {
+        const newFormats: Record<string, string[]> = {};
+
+        for (const issue of resolvedIssues) {
+          if (issue.type === 'ambiguous_date_format' && issue.resolution) {
+            const profileCol = selectedProfile.columns.find(c => 
+              c.acceptedNames.some(name => 
+                name.toLowerCase() === issue.column.toLowerCase()
+              )
+            );
+            
+            if (profileCol) {
+              const zohoCol = profileCol.zohoColumn;
+              const format = issue.resolution?.type === 'date_format' ? issue.resolution.format : 'DD/MM/YYYY';
+              
+              if (!newFormats[zohoCol]) newFormats[zohoCol] = [];
+              if (!newFormats[zohoCol].includes(format)) {
+                newFormats[zohoCol].push(format);
+              }
+            }
+          }
+        }
+
+        if (Object.keys(newFormats).length > 0) {
+          updates.newFormats = newFormats;
+        }
+      }
+
+      await fetch(`/api/profiles/${selectedProfile.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      });
+
+      console.log('Profil mis a jour avec succes');
+
+    } else if (profileMode === 'new') {
+      console.log('Creation d un nouveau profil');
+
+      const profileColumns = detectedColumns.map(col => {
+        const resolution = resolvedIssues?.find(r => r.column === col.name);
+        
+        let dataType: 'date' | 'duration' | 'number' | 'text' | 'boolean' = 'text';
+        if (col.detectedType === 'date') dataType = 'date';
+        else if (col.detectedType === 'duration') dataType = 'duration';
+        else if (col.detectedType === 'number') dataType = 'number';
+        else if (col.detectedType === 'boolean') dataType = 'boolean';
+
+        let config: Record<string, unknown>;
+        
+        if (dataType === 'date') {
+          const dayMonthOrder = (resolution?.resolution?.type === 'date_format' && resolution.resolution.format === 'MM/DD/YYYY') ? 'mdy' : 'dmy';
+          config = {
+            type: 'date',
+            acceptedFormats: col.detectedFormat ? [col.detectedFormat] : ['DD/MM/YYYY'],
+            dayMonthOrder,
+            outputFormat: 'iso',
+          };
+        } else if (dataType === 'duration') {
+          config = {
+            type: 'duration',
+            acceptedFormats: col.detectedFormat ? [col.detectedFormat] : ['HH:mm', 'HH:mm:ss'],
+            outputFormat: 'hms',
+          };
+        } else if (dataType === 'number') {
+          config = {
+            type: 'number',
+            acceptedFormats: [
+              { decimalSeparator: ',', thousandSeparator: ' ' },
+              { decimalSeparator: '.', thousandSeparator: null },
+            ],
+            expandScientific: true,
+            outputFormat: 'standard',
+          };
+        } else if (dataType === 'boolean') {
+          config = {
+            type: 'boolean',
+            trueValues: ['Oui', 'Yes', '1', 'Vrai', 'true', 'O'],
+            falseValues: ['Non', 'No', '0', 'Faux', 'false', 'N'],
+          };
+        } else {
+          config = {
+            type: 'text',
+            trim: true,
+            emptyValues: ['N/A', 'null', '-', 'NA', 'n/a'],
+            expandScientific: true,
+          };
+        }
+
+        return {
+          zohoColumn: col.name,
+          zohoType: 'PLAIN',
+          isRequired: false,
+          acceptedNames: [col.name],
+          dataType,
+          config,
+        };
+      });
+
+      const profilePayload = {
+        name: `Import ${state.config.tableName} - ${new Date().toLocaleDateString('fr-FR')}`,
+        workspaceId: selectedWorkspaceId,
+        workspaceName: workspace.name,
+        viewId: state.config.tableId,
+        viewName: state.config.tableName,
+        columns: profileColumns,
+        defaultImportMode: state.config.importMode,
+      };
+
+      const response = await fetch('/api/profiles', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(profilePayload),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        if (response.status === 409) {
+          // Un profil existe déjà pour cette table, on le met à jour avec les colonnes
+          console.log('Profil existant trouvé, mise à jour:', result.existingProfileId);
+          
+          // Faire un PUT pour mettre à jour le profil existant
+          const updateResponse = await fetch(`/api/profiles/${result.existingProfileId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              columns: profileColumns,
+              lastUsedAt: new Date().toISOString(),
+              useCount: 1,
+            }),
+          });
+          
+          if (updateResponse.ok) {
+            console.log('Profil existant mis à jour avec', profileColumns.length, 'colonnes');
+          } else {
+            console.error('Erreur mise à jour profil existant:', updateResponse.status);
+          }
+          return;
+        }
+        throw new Error(`Erreur creation profil: ${response.status}`);
+      } else {
+        console.log('Nouveau profil cree:', result.data?.id);
+      }
+    }
+  }, [profileMode, selectedProfile, selectedMatchResult, resolvedIssues, detectedColumns, selectedWorkspaceId, workspaces, state.config]);
 
   const handleImport = useCallback(async () => {
     if (!parsedData || !state.config.tableId || !state.validation) return;
@@ -274,6 +480,17 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
         throw new Error(result.error || "Erreur lors de l'import");
       }
 
+      // ==========================================================================
+      // Sauvegarder/mettre a jour le profil apres import reussi
+      // ==========================================================================
+      if (profileMode !== 'skip') {
+        try {
+          await saveOrUpdateProfile();
+        } catch (profileError) {
+          console.error('Erreur sauvegarde profil (non bloquant):', profileError);
+        }
+      }
+
       setImportSuccess({
         success: true,
         importId: result.importId || `imp_${Date.now()}`,
@@ -282,27 +499,68 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
         zohoImportId: result.importId,
       });
 
+      // Reset des etats
       setParsedData(null);
       setSchemaValidation(null);
       setZohoSchema(null);
       setResolvedIssues(null);
       setIssuesResolved(false);
+      setSelectedProfile(null);
+      setSelectedMatchResult(null);
+      setDetectedColumns([]);
+      setProfileMode('skip');
     } catch (error) {
       console.error('Erreur import:', error);
       setImportError(
         error instanceof Error ? error.message : "Erreur lors de l'import"
       );
     }
-  }, [parsedData, state.config, state.validation, selectedWorkspaceId, startImport, updateProgress, setImportSuccess, setImportError]);
+  }, [parsedData, state.config, state.validation, selectedWorkspaceId, profileMode, saveOrUpdateProfile, startImport, updateProgress, setImportSuccess, setImportError]);
 
-  // Handler pour la résolution des issues
+  // ==========================================================================
+  // Handlers pour StepProfile
+  // ==========================================================================
+  const handleProfileSelected = useCallback((profile: ImportProfile, matchResult: ProfileMatchResult) => {
+    console.log('Profile selected:', profile.name);
+    setSelectedProfile(profile);
+    setSelectedMatchResult(matchResult);
+    setProfileMode('existing');
+    
+    setSelectedWorkspaceId(profile.workspaceId);
+    setTable(profile.viewId, profile.viewName);
+    setImportMode(profile.defaultImportMode);
+    
+    if (!matchResult.needsConfirmation) {
+      goToStep('validating');
+    } else {
+      goToStep('configuring');
+    }
+  }, [setTable, setImportMode, goToStep]);
+
+  const handleCreateNewProfile = useCallback((columns: DetectedColumn[]) => {
+    console.log('Create new profile with', columns.length, 'columns');
+    setDetectedColumns(columns);
+    setProfileMode('new');
+    setSelectedProfile(null);
+    goToStep('configuring');
+  }, [goToStep]);
+
+  const handleSkipProfile = useCallback((columns: DetectedColumn[]) => {
+    console.log('Skip profile, import ponctuel');
+    setDetectedColumns(columns);
+    setProfileMode('skip');
+    setSelectedProfile(null);
+    goToStep('configuring');
+  }, [goToStep]);
+
+  // Handler pour la resolution des issues
   const handleIssuesResolved = useCallback((resolved: ResolvableIssue[]) => {
-    console.log('Issues résolues:', resolved.length);
+    console.log('Issues resolues:', resolved.length);
     setResolvedIssues(resolved);
     setIssuesResolved(true);
   }, []);
 
-  // Vérifier si on doit afficher l'étape de résolution
+  // Verifier si on doit afficher l etape de resolution
   const hasUnresolvedIssues = schemaValidation?.resolvableIssues && 
     schemaValidation.resolvableIssues.length > 0 && 
     !issuesResolved;
@@ -323,7 +581,6 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
         );
 
       case 'profiling':
-        // Parser le fichier si pas encore fait
         if (!parsedData && state.config.file) {
           parseFile(state.config.file).then(result => {
             setParsedData(result.data);
@@ -332,25 +589,16 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
         }
         
         if (!parsedData) {
-          return <div className="text-center p-8">Aucune donnée à analyser</div>;
+          return <div className="text-center p-8">Aucune donnee a analyser</div>;
         }
         
         return (
           <StepProfile
             fileData={(parsedData as Record<string, string>[])}
             fileName={state.config.file?.name || ''}
-            onProfileSelected={(profile, matchResult) => {
-              console.log('Profile selected:', profile.name, matchResult);
-              goToStep('configuring');
-            }}
-            onCreateNewProfile={(detectedColumns) => {
-              console.log('Create new profile:', detectedColumns.length);
-              goToStep('configuring');
-            }}
-            onSkipProfile={(detectedColumns) => {
-              console.log('Skip profile:', detectedColumns.length);
-              goToStep('configuring');
-            }}
+            onProfileSelected={handleProfileSelected}
+            onCreateNewProfile={handleCreateNewProfile}
+            onSkipProfile={handleSkipProfile}
             onBack={goBack}
           />
         );
@@ -361,6 +609,12 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
             {workspacesError && (
               <Alert variant="error" className="mb-4">
                 {workspacesError}
+              </Alert>
+            )}
+
+            {profileMode === 'existing' && selectedProfile && (
+             <Alert variant="info" className="mb-4">
+                Profil &quot;{selectedProfile.name}&quot; selectionne - Table: {selectedProfile.viewName}
               </Alert>
             )}
 
@@ -392,7 +646,6 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
         );
 
       case 'reviewing':
-        // Si des issues sont à résoudre et pas encore résolues, afficher StepResolve
         if (hasUnresolvedIssues && schemaValidation?.resolvableIssues) {
           return (
             <StepResolve
@@ -403,7 +656,6 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
           );
         }
         
-        // Sinon afficher la review normale
         return state.validation ? (
           <StepReview
             validation={state.validation}
@@ -412,8 +664,6 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
             importMode={state.config.importMode}
             isImporting={isImporting}
             onBack={() => {
-              // Si on revient en arrière depuis review après résolution,
-              // on revient à la résolution
               if (resolvedIssues && schemaValidation?.resolvableIssues && schemaValidation.resolvableIssues.length > 0) {
                 setIssuesResolved(false);
               } else {
@@ -421,8 +671,8 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
               }
             }}
             onImport={handleImport}
-              resolvedIssues={resolvedIssues || []}
-            />
+            resolvedIssues={resolvedIssues || []}
+          />
         ) : null;
 
       case 'importing':

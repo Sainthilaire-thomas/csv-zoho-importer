@@ -1,7 +1,7 @@
 
 # CSV to Zoho Analytics Importer - Contexte de Base
 
-*Mis à jour le 2025-12-03 (Session 2 Mission 005 - Import complet validé)*
+*Mis à jour le 2025-12-04 (Session 3 Mission 005 - Sauvegarde profils + specs v2.1)*
 
 ---
 
@@ -22,6 +22,7 @@ Application web permettant d'automatiser l'import de fichiers CSV/Excel dans Zoh
 3. **Explicite plutôt qu'implicite** : Aucune conversion silencieuse. L'utilisateur voit et valide chaque transformation.
 4. **Échec rapide** : Bloquer AVANT l'import si doute sur l'intégrité des données.
 5. **Accumulation intelligente** : Le profil apprend les alias et formats au fil du temps.
+6. **Un profil = une configuration complète** : Mode d'import et clé de matching non modifiables à la volée.
 
 ### Stack technique
 
@@ -57,6 +58,8 @@ Un **Profil d'Import** est une configuration attachée à une **table Zoho** qui
 * Comment interpréter les colonnes des fichiers sources
 * Comment transformer les données vers un format universel
 * Quels alias de noms de colonnes sont acceptés
+* Le mode d'import par défaut (APPEND, TRUNCATEADD, UPDATEADD...)
+* La clé de matching pour les modes UPDATE*
 
 ```
 Fichiers Excel          PROFIL                    Table Zoho
@@ -80,14 +83,27 @@ Fichiers Excel          PROFIL                    Table Zoho
 
 ### Règles métier
 
-| #  | Règle                                                                      |
-| -- | --------------------------------------------------------------------------- |
-| R1 | Un profil = une table Zoho (relation 1:1 via view_id UNIQUE)                |
-| R2 | Le profil accumule les alias/formats au fil du temps                        |
-| R3 | Les formats ambigus (dates JJ/MM vs MM/JJ) nécessitent confirmation unique |
-| R4 | La notation scientifique est toujours développée (1E6 → 1000000)         |
-| R5 | Les profils sont partagés entre tous les utilisateurs                      |
-| R6 | Seules les métadonnées sont stockées (zero data retention)               |
+| #  | Règle                                                                             |
+| -- | ---------------------------------------------------------------------------------- |
+| R1 | Un profil = une table Zoho (relation 1:1 via view_id UNIQUE)                       |
+| R2 | Le profil accumule les alias/formats au fil du temps                               |
+| R3 | Les formats ambigus (dates JJ/MM vs MM/JJ) nécessitent confirmation unique        |
+| R4 | La notation scientifique est toujours développée (1E6 → 1000000)                |
+| R5 | Les profils sont partagés entre tous les utilisateurs                             |
+| R6 | Seules les métadonnées sont stockées (zero data retention)                      |
+| R7 | Un profil = une configuration complète (mode + clé non modifiables à la volée) |
+| R8 | Les modes UPDATEADD, DELETEUPSERT, ONLYADD nécessitent une clé de matching       |
+| R9 | La clé de matching est obligatoire à la création si le mode le requiert         |
+
+### Modes d'import
+
+| Mode                   | Clé requise    | Description                         |
+| ---------------------- | --------------- | ----------------------------------- |
+| **APPEND**       | ❌ Non          | Ajoute les lignes à la fin         |
+| **TRUNCATEADD**  | ❌ Non          | Vide la table, réimporte tout      |
+| **UPDATEADD**    | ✅**Oui** | Met à jour si existe, ajoute sinon |
+| **DELETEUPSERT** | ✅**Oui** | Supprime absents + upsert           |
+| **ONLYADD**      | ✅**Oui** | Ajoute uniquement les nouveaux      |
 
 ### Formats universels
 
@@ -151,7 +167,7 @@ Fichiers Excel          PROFIL                    Table Zoho
         ↓
 6. Vérification          Récapitulatif avant import
         ↓
-7. Import                Envoi à Zoho Analytics + confirmation
+7. Import                Envoi à Zoho Analytics + confirmation + sauvegarde profil
 ```
 
 ### Types de transformations
@@ -164,6 +180,14 @@ Fichiers Excel          PROFIL                    Table Zoho
 | ambiguous_date_format | ⚠️ Confirm | Oui      | 05/03/2025 → ?    |
 | scientific_notation   | ⚠️ Confirm | Oui      | 1E6 → 1000000     |
 | iso_date              | ⚠️ Confirm | Oui      | 2025-03-05 → ?    |
+
+### Trois chemins à l'étape Profil
+
+| Chemin          | Mode         | Comportement                                            |
+| --------------- | ------------ | ------------------------------------------------------- |
+| Profil existant | `existing` | Pré-remplit config, skip résolution si formats connus |
+| Nouveau profil  | `new`      | Configuration complète, sauvegardé après import      |
+| Import ponctuel | `skip`     | Config manuelle, aucune sauvegarde                      |
 
 ---
 
@@ -220,158 +244,39 @@ formData.append('FILE', csvBlob, 'import.csv');  // 'FILE' pas 'ZOHO_FILE'
 
 ---
 
-## Structure actuelle du projet
-
-```
-csv-zoho-importer/
-├── app/
-│   ├── (auth)/
-│   │   ├── login/page.tsx
-│   │   └── layout.tsx
-│   ├── (dashboard)/
-│   │   ├── history/page.tsx
-│   │   ├── import/
-│   │   │   ├── page.tsx
-│   │   │   └── import-page-client.tsx
-│   │   ├── settings/page.tsx
-│   │   └── layout.tsx
-│   ├── api/
-│   │   ├── csv/
-│   │   │   ├── import/route.ts
-│   │   │   └── validate/route.ts
-│   │   ├── profiles/                    ✅ CRÉÉ Mission 005
-│   │   │   ├── route.ts                 # GET/POST profils
-│   │   │   ├── [id]/route.ts            # GET/PUT/DELETE par ID
-│   │   │   └── match/route.ts           # POST matching colonnes
-│   │   └── zoho/
-│   │       ├── oauth/
-│   │       │   ├── authorize/route.ts   ✅
-│   │       │   ├── callback/route.ts    ✅
-│   │       │   ├── status/route.ts      ✅
-│   │       │   └── disconnect/route.ts  ✅
-│   │       ├── workspaces/route.ts      ✅
-│   │       ├── tables/route.ts          ✅
-│   │       ├── folders/route.ts         ✅
-│   │       ├── columns/route.ts         ✅
-│   │       └── import/route.ts          ✅
-│   ├── globals.css
-│   ├── layout.tsx
-│   └── page.tsx
-├── components/
-│   ├── import/
-│   │   ├── wizard/
-│   │   │   ├── import-wizard.tsx        ✅ (7 étapes)
-│   │   │   ├── step-source.tsx          ✅
-│   │   │   ├── step-profile.tsx         ✅ CRÉÉ Mission 005
-│   │   │   ├── step-config.tsx          ✅ (accordéon tables)
-│   │   │   ├── step-validate.tsx        ✅
-│   │   │   ├── step-resolve.tsx         ✅ (3 types bloquants)
-│   │   │   ├── step-review.tsx          ✅ (AutoTransformationsSection)
-│   │   │   ├── step-confirm.tsx         ✅
-│   │   │   └── wizard-progress.tsx      ✅ (7 étapes)
-│   │   ├── file-dropzone.tsx
-│   │   ├── table-selector.tsx           ✅ (viewId/viewName corrigé)
-│   │   └── transformation-preview.tsx
-│   ├── settings/
-│   │   └── zoho-connection-card.tsx
-│   └── ui/
-│       └── ... (composants shadcn)
-├── lib/
-│   ├── domain/
-│   │   ├── detection/                   ✅ CRÉÉ Mission 005
-│   │   │   ├── type-detector.ts         # Détection types colonnes
-│   │   │   └── index.ts
-│   │   ├── profile/                     ✅ CRÉÉ Mission 005
-│   │   │   ├── profile-manager.ts       # Service CRUD + matching
-│   │   │   └── index.ts
-│   │   ├── validation/
-│   │   │   ├── engine.ts
-│   │   │   └── rules/
-│   │   └── schema-validator.ts          ✅ (detectAutoTransformations)
-│   ├── hooks/
-│   │   ├── use-import.ts                ✅ (navigation profiling)
-│   │   └── use-zoho-connection.ts
-│   └── infrastructure/
-│       ├── supabase/
-│       └── zoho/
-│           └── types.ts                 ✅ (AutoTransformation type)
-├── types/
-│   ├── index.ts                         ✅ (ImportStatus avec 'profiling')
-│   └── profiles.ts                      ✅ CRÉÉ Mission 005
-├── docs/
-│   ├── ai-context/
-│   │   ├── base-context.md              # Ce fichier
-│   │   └── missions/
-│   │       ├── mission-005-profils-import.md
-│   │       └── ...
-│   ├── sql/
-│   │   └── 003-import-profiles.sql      ✅ Exécuté
-│   └── specs-profils-import.md          # Spécifications détaillées
-└── package.json
-```
-
----
-
-## Types TypeScript clés
-
-### Types profils (types/profiles.ts) ✅ CRÉÉS
+## Types principaux
 
 ```typescript
 interface ImportProfile {
   id: string;
   name: string;
-  description?: string;
   workspaceId: string;
   workspaceName: string;
   viewId: string;
   viewName: string;
   columns: ProfileColumn[];
-  defaultImportMode: 'append' | 'truncateadd' | 'updateadd';
+  defaultImportMode: ImportMode;
+  matchingColumns?: string[];  // Clé pour modes UPDATE*
   createdAt: Date;
-  createdBy: string;
-  updatedAt: Date;
   lastUsedAt: Date;
   useCount: number;
 }
 
 interface ProfileColumn {
-  id: string;
   zohoColumn: string;
   zohoType: ZohoDataType;
   isRequired: boolean;
-  acceptedNames: string[];  // Alias accumulés
+  acceptedNames: string[];
   dataType: 'date' | 'duration' | 'number' | 'text' | 'boolean';
-  config: DateColumnConfig | DurationColumnConfig | NumberColumnConfig | TextColumnConfig;
+  config: ColumnConfig;
 }
 
-interface DetectedColumn {
-  name: string;
-  detectedType: DetectedColumnType;
-  sampleValues: string[];
-  confidence: number;
-  suggestedZohoType?: ZohoDataType;
-  issues?: DetectionIssue[];
-}
-```
-
-### Types validation schéma (types/index.ts)
-
-```typescript
-interface ColumnMapping {
-  fileColumn: string;
-  zohoColumn: string | null;
-  fileType: DetectedColumnType;
-  zohoType: string | null;
-  status: 'matched' | 'partial' | 'missing' | 'extra';
-  confidence: number;
-}
-
-interface SchemaValidationResult {
-  isValid: boolean;
-  mappings: ColumnMapping[];
-  errors: SchemaValidationError[];
-  warnings: SchemaValidationWarning[];
-}
+type ColumnConfig = 
+  | DateColumnConfig      // dayMonthOrder: 'dmy' | 'mdy'
+  | DurationColumnConfig  // acceptedFormats
+  | NumberColumnConfig    // expandScientific
+  | TextColumnConfig      // trim, emptyValues
+  | BooleanColumnConfig;  // trueValues, falseValues
 
 type ImportStatus = 
   | 'idle' 
@@ -384,6 +289,8 @@ type ImportStatus =
   | 'importing' 
   | 'success' 
   | 'error';
+
+type ProfileMode = 'existing' | 'new' | 'skip';
 ```
 
 ---
@@ -455,7 +362,7 @@ APP_URL=http://localhost:3000
 * ✅ Service TypeDetector (`lib/domain/detection/`)
 * ✅ Service ProfileManager (`lib/domain/profile/`)
 
-**Phase 3 - Interface** 🔄
+**Phase 3 - Interface** ✅ (90%)
 
 * ✅ Étape wizard step-profile.tsx
 * ✅ Wizard 7 étapes avec profiling
@@ -463,14 +370,18 @@ APP_URL=http://localhost:3000
 * ✅ Transformations automatiques (detectAutoTransformations)
 * ✅ Résolution issues (dates ambiguës)
 * ✅ Import complet validé (14 lignes QUITTANCES)
-* ❌ **Sauvegarde profil après import** (handlers vides)
+* ✅ **Sauvegarde profil après import** (saveOrUpdateProfile)
+* ✅ **Pré-remplissage config depuis profil**
+* ✅ **Skip résolution si format connu dans profil**
+* ❌ Fix : passer profile à validateSchema
 
 **Phase 4 - Intégration complète** ⏳
 
-* ❌ Sauvegarde profil après import réussi
-* ❌ Matching profil existant lors d'un nouvel import
-* ❌ Skip résolution si format déjà connu
-* ❌ Test accumulation alias
+* ❌ Fix validateSchema (ajouter `profile: selectedProfile`)
+* ❌ Migration BDD (matching_columns)
+* ❌ Sélecteur clé de matching dans StepConfig
+* ❌ Validation mode + clé avant import
+* ❌ Composant ProfileDetails (aperçu profil)
 
 ### 📋 Futures missions
 
@@ -514,13 +425,13 @@ CB, TVA, TTC, Motif, Exonération, Vu BCA, ACO, Véhicule
 
 ## Documents de référence
 
-| Document                             | Description                                   |
-| ------------------------------------ | --------------------------------------------- |
-| `docs/specs-profils-import.md`     | **RÉFÉRENCE MISSION 005**- 945 lignes |
-| `docs/specs-fonctionnelles.md`     | Specs originales                              |
-| `docs/specs-validation-avancee.md` | Validation (remplacé par profils)            |
-| `docs/architecture-cible-v3.md`    | Architecture technique                        |
-| `mission-005-profils-import.md`    | Mission en cours                              |
+| Document                             | Description                                           |
+| ------------------------------------ | ----------------------------------------------------- |
+| `docs/specs-profils-import.md`     | **RÉFÉRENCE MISSION 005**- v2.1 (16 sections) |
+| `docs/specs-fonctionnelles.md`     | Specs originales                                      |
+| `docs/specs-validation-avancee.md` | Validation (remplacé par profils)                    |
+| `docs/architecture-cible-v3.md`    | Architecture technique                                |
+| `mission-005-profils-import.md`    | Mission en cours                                      |
 
 ---
 
@@ -567,8 +478,15 @@ fetch('/api/profiles').then(r => r.json()).then(console.log)
 11. **resolvedIssues non transmises** : Ajout prop resolvedIssues à StepReview
 12. **Accolades orphelines schema-validator** : Restauration Git après suppression logs
 
+### Mission 005 (Session 3)
+
+13. **Body stream already read** : `response.json()` appelé 2 fois sur erreur 409
+14. **IssueResolution type error** : Union type, accéder via `resolution?.type === 'date_format'`
+15. **ColumnConfig type error** : Cast explicite après vérification `config.type === 'date'`
+16. **Alert variant invalid** : `variant="default"` n'existe pas, utiliser `variant="info"`
+
 ---
 
 *Ce document doit être mis à jour lorsque les types fondamentaux ou l'architecture changent.*
 
-*Dernière mise à jour : 2025-12-03*
+*Dernière mise à jour : 2025-12-04*

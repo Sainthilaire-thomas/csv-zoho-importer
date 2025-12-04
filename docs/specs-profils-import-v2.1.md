@@ -1,8 +1,12 @@
+
 # Spécifications Fonctionnelles - Système de Profils d'Import
 
-**Version:** 2.0
-**Date:** 1er décembre 2025
+**Version:** 2.1
+
+**Date:** 4 décembre 2025
+
 **Projet:** CSV to Zoho Analytics Importer
+
 **Remplace:** specs-validation-avancee.md (approche par validation répétitive)
 
 ---
@@ -13,9 +17,9 @@
 
 Un **Profil d'Import** est une configuration attachée à une **table Zoho Analytics** qui définit :
 
-- Comment interpréter les colonnes des fichiers sources
-- Comment transformer les données vers un format universel
-- Quels alias de noms de colonnes sont acceptés
+* Comment interpréter les colonnes des fichiers sources
+* Comment transformer les données vers un format universel
+* Quels alias de noms de colonnes sont acceptés
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -54,10 +58,10 @@ Un **Profil d'Import** est une configuration attachée à une **table Zoho Analy
 
 ### 1.3 Objectifs
 
-- **Réduire le temps d'import** : Configuration une fois, réutilisation automatique
-- **Éliminer les erreurs** : Format confirmé explicitement, pas de conversion silencieuse
-- **Supporter les variations** : Fichiers de formats légèrement différents acceptés
-- **Garantir la traçabilité** : Profil versionné et partagé entre utilisateurs
+* **Réduire le temps d'import** : Configuration une fois, réutilisation automatique
+* **Éliminer les erreurs** : Format confirmé explicitement, pas de conversion silencieuse
+* **Supporter les variations** : Fichiers de formats légèrement différents acceptés
+* **Garantir la traçabilité** : Profil versionné et partagé entre utilisateurs
 
 ---
 
@@ -65,15 +69,15 @@ Un **Profil d'Import** est une configuration attachée à une **table Zoho Analy
 
 ### 2.1 Tableau des formats
 
-| Type données             | Formats sources acceptés                      | Format universel             | Format Zoho             |
-| ------------------------- | ---------------------------------------------- | ---------------------------- | ----------------------- |
-| **Date**            | DD/MM/YYYY, DD-MM-YYYY, MM/DD/YYYY, YYYY-MM-DD | `YYYY-MM-DD` (ISO 8601)    | DATE_AS_DATE            |
-| **Durée**          | HH:mm, H:mm, HH:mm:ss                          | `HH:mm:ss`                 | DURATION                |
-| **Nombre décimal** | 1234,56 / 1234.56 / 1 234,56                   | `1234.56` (point décimal) | DECIMAL_NUMBER          |
-| **Nombre entier**   | 1234 / 1 234                                   | `1234`                     | NUMBER, POSITIVE_NUMBER |
-| **Scientifique**    | 1E6, 2.5E3                                     | `1000000` (développé)    | Texte ou Nombre         |
-| **Booléen**        | Oui/Non, Yes/No, 1/0, Vrai/Faux                | `true/false`               | -                       |
-| **Texte**           | Tout                                           | Trimmed, UTF-8               | PLAIN, MULTI_LINE       |
+| Type données             | Formats sources acceptés                      | Format universel            | Format Zoho             |
+| ------------------------- | ---------------------------------------------- | --------------------------- | ----------------------- |
+| **Date**            | DD/MM/YYYY, DD-MM-YYYY, MM/DD/YYYY, YYYY-MM-DD | `YYYY-MM-DD`(ISO 8601)    | DATE_AS_DATE            |
+| **Durée**          | HH:mm, H:mm, HH:mm:ss                          | `HH:mm:ss`                | DURATION                |
+| **Nombre décimal** | 1234,56 / 1234.56 / 1 234,56                   | `1234.56`(point décimal) | DECIMAL_NUMBER          |
+| **Nombre entier**   | 1234 / 1 234                                   | `1234`                    | NUMBER, POSITIVE_NUMBER |
+| **Scientifique**    | 1E6, 2.5E3                                     | `1000000`(développé)    | Texte ou Nombre         |
+| **Booléen**        | Oui/Non, Yes/No, 1/0, Vrai/Faux                | `true/false`              | -                       |
+| **Texte**           | Tout                                           | Trimmed, UTF-8              | PLAIN, MULTI_LINE       |
 
 ### 2.2 Dates
 
@@ -165,7 +169,7 @@ function detectNumberFormat(value: string): NumberFormat {
 
 #### Règle
 
-La notation scientifique est **toujours développée**. Le type Zoho cible détermine si le résultat est texte ou nombre.
+La notation scientifique est  **toujours développée** . Le type Zoho cible détermine si le résultat est texte ou nombre.
 
 **Cas typique** : Excel convertit automatiquement les numéros de PV (ex: "1000000") en notation scientifique ("1E6"). L'import doit restaurer la valeur complète.
 
@@ -208,7 +212,8 @@ interface ImportProfile {
   columns: ProfileColumn[];
   
   // === PARAMÈTRES IMPORT ===
-  defaultImportMode: 'append' | 'truncateadd' | 'updateadd';
+  defaultImportMode: 'append' | 'truncateadd' | 'updateadd' | 'deleteupsert' | 'onlyadd';
+  matchingColumns?: string[];      // Clé de matching pour modes UPDATE*
   
   // === MÉTADONNÉES ===
   createdAt: Date;
@@ -304,6 +309,7 @@ CREATE TABLE csv_importer.import_profiles (
   
   -- Paramètres par défaut
   default_import_mode TEXT DEFAULT 'append',
+  matching_columns TEXT[] DEFAULT NULL,  -- Clé de matching
   
   -- Métadonnées
   created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -322,6 +328,10 @@ ALTER TABLE csv_importer.import_profiles ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Authenticated users can manage profiles" 
   ON csv_importer.import_profiles
   FOR ALL USING (auth.role() = 'authenticated');
+
+-- Commentaire sur la colonne matching_columns
+COMMENT ON COLUMN csv_importer.import_profiles.matching_columns IS 
+  'Colonnes formant la clé unique pour les modes UPDATEADD, DELETEUPSERT, ONLYADD';
 ```
 
 ---
@@ -625,11 +635,11 @@ function findBestProfiles(
           normalize(alias) === normalize(fileCol.name)
         )
       );
-    
+  
       if (exactMatch) {
         // Vérifier si le format est connu
         const formatKnown = isFormatKnown(fileCol, exactMatch);
-      
+    
         mappings.push({
           fileColumn: fileCol.name,
           fileType: fileCol.detectedType,
@@ -640,10 +650,10 @@ function findBestProfiles(
         score += formatKnown ? 1 : 0.8;
         continue;
       }
-    
+  
       // 2. Chercher correspondance similaire (fuzzy)
       const fuzzyMatch = findFuzzyMatch(fileCol.name, profile.columns);
-    
+  
       if (fuzzyMatch && fuzzyMatch.similarity > 80) {
         mappings.push({
           fileColumn: fileCol.name,
@@ -656,7 +666,7 @@ function findBestProfiles(
         score += 0.5;
         continue;
       }
-    
+  
       // 3. Nouvelle colonne
       mappings.push({
         fileColumn: fileCol.name,
@@ -919,60 +929,69 @@ CREATE TABLE csv_importer.import_history (
 
 Les profils sont **partagés** entre tous les utilisateurs car :
 
-- Cohérence des imports entre utilisateurs
-- Un utilisateur configure, les autres réutilisent
-- Évite les doublons de configuration
+* Cohérence des imports entre utilisateurs
+* Un utilisateur configure, les autres réutilisent
+* Évite les doublons de configuration
 
 ---
 
 ## 11. Résumé des règles métier
 
-| #   | Règle                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| R1  | Un profil est lié à UNE table Zoho (relation 1:1)                                                                                                                                                                                                                                                                                                                                                                                                            |
-| R2  | Le profil accumule les alias et formats au fil du temps                                                                                                                                                                                                                                                                                                                                                                                                        |
-| R3  | Les formats ambigus (dates, notation scientifique) nécessitent confirmation                                                                                                                                                                                                                                                                                                                                                                                   |
-| R4  | La confirmation est mémorisée pour les imports suivants                                                                                                                                                                                                                                                                                                                                                                                                      |
-| R5  | Le fichier legacy (ancien format) est reconnu si ses alias sont dans le profil                                                                                                                                                                                                                                                                                                                                                                                 |
-| R6  | La notation scientifique est toujours développée (1E6 → 1000000)                                                                                                                                                                                                                                                                                                                                                                                            |
-| R7  | Les transformations produisent un format universel intermédiaire                                                                                                                                                                                                                                                                                                                                                                                              |
-| R8  | L'utilisateur peut toujours forcer un import ponctuel sans profil                                                                                                                                                                                                                                                                                                                                                                                              |
-| R9  | Les profils sont partagés entre tous les utilisateurs                                                                                                                                                                                                                                                                                                                                                                                                         |
-| R10 | Seules les métadonnées sont stockées (zero data retention)<br />R11Un profil = une configuration complète (mode + clé non modifiables à la volée)R12Les modes UPDATEADD, DELETEUPSERT, ONLYADD nécessitent une clé de matchingR13La clé de matching est obligatoire à la création si le mode le requiertR14Un profil sans clé ne peut pas utiliser les modes UPDATE*R15L'aperçu du profil permet de consulter sa configuration avant utilisation |
+| #   | Règle                                                                             |
+| --- | ---------------------------------------------------------------------------------- |
+| R1  | Un profil est lié à UNE table Zoho (relation 1:1)                                |
+| R2  | Le profil accumule les alias et formats au fil du temps                            |
+| R3  | Les formats ambigus (dates, notation scientifique) nécessitent confirmation       |
+| R4  | La confirmation est mémorisée pour les imports suivants                          |
+| R5  | Le fichier legacy (ancien format) est reconnu si ses alias sont dans le profil     |
+| R6  | La notation scientifique est toujours développée (1E6 → 1000000)                |
+| R7  | Les transformations produisent un format universel intermédiaire                  |
+| R8  | L'utilisateur peut toujours forcer un import ponctuel sans profil                  |
+| R9  | Les profils sont partagés entre tous les utilisateurs                             |
+| R10 | Seules les métadonnées sont stockées (zero data retention)                      |
+| R11 | Un profil = une configuration complète (mode + clé non modifiables à la volée) |
+| R12 | Les modes UPDATEADD, DELETEUPSERT, ONLYADD nécessitent une clé de matching       |
+| R13 | La clé de matching est obligatoire à la création si le mode le requiert         |
+| R14 | Un profil sans clé ne peut pas utiliser les modes UPDATE*                         |
+| R15 | L'aperçu du profil permet de consulter sa configuration avant utilisation         |
+
+---
 
 ## 12. Modes d'import et clé de matching
 
 ### 12.1 Matrice des modes Zoho
 
-<pre class="font-ui border-border-100/50 overflow-x-scroll w-full rounded border-[0.5px] shadow-[0_2px_12px_hsl(var(--always-black)/5%)]"><table class="bg-bg-100 min-w-full border-separate border-spacing-0 text-sm leading-[1.88888] whitespace-normal"><thead class="border-b-border-100/50 border-b-[0.5px] text-left"><tr class="[tbody>&]:odd:bg-bg-500/10"><th class="text-text-000 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] px-2 [&:not(:first-child)]:border-l-[0.5px]">Mode</th><th class="text-text-000 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] px-2 [&:not(:first-child)]:border-l-[0.5px]">Clé requise</th><th class="text-text-000 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] px-2 [&:not(:first-child)]:border-l-[0.5px]">Description</th><th class="text-text-000 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] px-2 [&:not(:first-child)]:border-l-[0.5px]">Cas d'usage</th></tr></thead><tbody><tr class="[tbody>&]:odd:bg-bg-500/10"><td class="border-t-border-100/50 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] border-t-[0.5px] px-2 [&:not(:first-child)]:border-l-[0.5px]"><strong>APPEND</strong></td><td class="border-t-border-100/50 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] border-t-[0.5px] px-2 [&:not(:first-child)]:border-l-[0.5px]">❌ Non</td><td class="border-t-border-100/50 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] border-t-[0.5px] px-2 [&:not(:first-child)]:border-l-[0.5px]">Ajoute les lignes à la fin</td><td class="border-t-border-100/50 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] border-t-[0.5px] px-2 [&:not(:first-child)]:border-l-[0.5px]">Import mensuel cumulatif</td></tr><tr class="[tbody>&]:odd:bg-bg-500/10"><td class="border-t-border-100/50 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] border-t-[0.5px] px-2 [&:not(:first-child)]:border-l-[0.5px]"><strong>TRUNCATEADD</strong></td><td class="border-t-border-100/50 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] border-t-[0.5px] px-2 [&:not(:first-child)]:border-l-[0.5px]">❌ Non</td><td class="border-t-border-100/50 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] border-t-[0.5px] px-2 [&:not(:first-child)]:border-l-[0.5px]">Vide la table, réimporte tout</td><td class="border-t-border-100/50 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] border-t-[0.5px] px-2 [&:not(:first-child)]:border-l-[0.5px]">Remplacement complet</td></tr><tr class="[tbody>&]:odd:bg-bg-500/10"><td class="border-t-border-100/50 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] border-t-[0.5px] px-2 [&:not(:first-child)]:border-l-[0.5px]"><strong>UPDATEADD</strong></td><td class="border-t-border-100/50 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] border-t-[0.5px] px-2 [&:not(:first-child)]:border-l-[0.5px]">✅ <strong>Oui</strong></td><td class="border-t-border-100/50 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] border-t-[0.5px] px-2 [&:not(:first-child)]:border-l-[0.5px]">Met à jour si existe, ajoute sinon</td><td class="border-t-border-100/50 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] border-t-[0.5px] px-2 [&:not(:first-child)]:border-l-[0.5px]">Synchronisation</td></tr><tr class="[tbody>&]:odd:bg-bg-500/10"><td class="border-t-border-100/50 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] border-t-[0.5px] px-2 [&:not(:first-child)]:border-l-[0.5px]"><strong>DELETEUPSERT</strong></td><td class="border-t-border-100/50 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] border-t-[0.5px] px-2 [&:not(:first-child)]:border-l-[0.5px]">✅ <strong>Oui</strong></td><td class="border-t-border-100/50 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] border-t-[0.5px] px-2 [&:not(:first-child)]:border-l-[0.5px]">Supprime absents + upsert</td><td class="border-t-border-100/50 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] border-t-[0.5px] px-2 [&:not(:first-child)]:border-l-[0.5px]">Miroir exact</td></tr><tr class="[tbody>&]:odd:bg-bg-500/10"><td class="border-t-border-100/50 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] border-t-[0.5px] px-2 [&:not(:first-child)]:border-l-[0.5px]"><strong>ONLYADD</strong></td><td class="border-t-border-100/50 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] border-t-[0.5px] px-2 [&:not(:first-child)]:border-l-[0.5px]">✅ <strong>Oui</strong></td><td class="border-t-border-100/50 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] border-t-[0.5px] px-2 [&:not(:first-child)]:border-l-[0.5px]">Ajoute uniquement les nouveaux</td><td class="border-t-border-100/50 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] border-t-[0.5px] px-2 [&:not(:first-child)]:border-l-[0.5px]">Incrémental sans doublon</td></tr></tbody></table></pre>
+| Mode                   | Clé requise    | Description                         | Cas d'usage               |
+| ---------------------- | --------------- | ----------------------------------- | ------------------------- |
+| **APPEND**       | ❌ Non          | Ajoute les lignes à la fin         | Import mensuel cumulatif  |
+| **TRUNCATEADD**  | ❌ Non          | Vide la table, réimporte tout      | Remplacement complet      |
+| **UPDATEADD**    | ✅**Oui** | Met à jour si existe, ajoute sinon | Synchronisation           |
+| **DELETEUPSERT** | ✅**Oui** | Supprime absents + upsert           | Miroir exact              |
+| **ONLYADD**      | ✅**Oui** | Ajoute uniquement les nouveaux      | Incrémental sans doublon |
 
 ### 12.2 Extension du modèle de données
 
 #### TypeScript
 
-typescript
-
 ```typescript
-interfaceImportProfile{
-// ... champs existants ...
+interface ImportProfile {
+  // ... champs existants ...
   
-  defaultImportMode:ImportMode;
+  defaultImportMode: ImportMode;
   
-// Clé de matching pour modes UPDATE/DELETE/ONLYADD
-  matchingColumns?:string[];// Ex: ["N° Quittance"] ou ["Année", "Mois", "Site"]
+  // Clé de matching pour modes UPDATE/DELETE/ONLYADD
+  matchingColumns?: string[];  // Ex: ["N° Quittance"] ou ["Année", "Mois", "Site"]
 }
 ```
 
 #### SQL (migration Supabase)
 
-sql
-
 ```sql
-ALTERTABLE csv_importer.import_profiles 
-ADDCOLUMN matching_columns TEXT[]DEFAULTNULL;
+ALTER TABLE csv_importer.import_profiles 
+ADD COLUMN matching_columns TEXT[] DEFAULT NULL;
 
-COMMENTONCOLUMN csv_importer.import_profiles.matching_columns IS 
-'Colonnes formant la clé unique pour les modes UPDATEADD, DELETEUPSERT, ONLYADD';
+COMMENT ON COLUMN csv_importer.import_profiles.matching_columns IS 
+  'Colonnes formant la clé unique pour les modes UPDATEADD, DELETEUPSERT, ONLYADD';
 ```
 
 ### 12.3 Règle d'or
@@ -991,7 +1010,12 @@ COMMENTONCOLUMN csv_importer.import_profiles.matching_columns IS
 
 ### 12.4 Validation avant import
 
-<pre class="font-ui border-border-100/50 overflow-x-scroll w-full rounded border-[0.5px] shadow-[0_2px_12px_hsl(var(--always-black)/5%)]"><table class="bg-bg-100 min-w-full border-separate border-spacing-0 text-sm leading-[1.88888] whitespace-normal"><thead class="border-b-border-100/50 border-b-[0.5px] text-left"><tr class="[tbody>&]:odd:bg-bg-500/10"><th class="text-text-000 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] px-2 [&:not(:first-child)]:border-l-[0.5px]">Situation</th><th class="text-text-000 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] px-2 [&:not(:first-child)]:border-l-[0.5px]">Résultat</th></tr></thead><tbody><tr class="[tbody>&]:odd:bg-bg-500/10"><td class="border-t-border-100/50 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] border-t-[0.5px] px-2 [&:not(:first-child)]:border-l-[0.5px]">Profil + mode APPEND/TRUNCATEADD</td><td class="border-t-border-100/50 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] border-t-[0.5px] px-2 [&:not(:first-child)]:border-l-[0.5px]">✅ Import autorisé</td></tr><tr class="[tbody>&]:odd:bg-bg-500/10"><td class="border-t-border-100/50 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] border-t-[0.5px] px-2 [&:not(:first-child)]:border-l-[0.5px]">Profil + mode UPDATE* + clé définie</td><td class="border-t-border-100/50 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] border-t-[0.5px] px-2 [&:not(:first-child)]:border-l-[0.5px]">✅ Import autorisé</td></tr><tr class="[tbody>&]:odd:bg-bg-500/10"><td class="border-t-border-100/50 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] border-t-[0.5px] px-2 [&:not(:first-child)]:border-l-[0.5px]">Profil + mode UPDATE* + clé vide</td><td class="border-t-border-100/50 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] border-t-[0.5px] px-2 [&:not(:first-child)]:border-l-[0.5px]">❌ Erreur "Profil incomplet"</td></tr><tr class="[tbody>&]:odd:bg-bg-500/10"><td class="border-t-border-100/50 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] border-t-[0.5px] px-2 [&:not(:first-child)]:border-l-[0.5px]">Import ponctuel + mode UPDATE*</td><td class="border-t-border-100/50 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] border-t-[0.5px] px-2 [&:not(:first-child)]:border-l-[0.5px]">⚠️ Demander la clé dans StepConfig</td></tr></tbody></table></pre>
+| Situation                             | Résultat                             |
+| ------------------------------------- | ------------------------------------- |
+| Profil + mode APPEND/TRUNCATEADD      | ✅ Import autorisé                   |
+| Profil + mode UPDATE* + clé définie | ✅ Import autorisé                   |
+| Profil + mode UPDATE* + clé vide     | ❌ Erreur "Profil incomplet"          |
+| Import ponctuel + mode UPDATE*        | ⚠️ Demander la clé dans StepConfig |
 
 *UPDATE = UPDATEADD, DELETEUPSERT, ou ONLYADD
 
@@ -1212,7 +1236,12 @@ Le bouton **"Voir détails"** dans StepProfile ouvre une modale avec les informa
 
 ### 14.3 Sections affichées
 
-<pre class="font-ui border-border-100/50 overflow-x-scroll w-full rounded border-[0.5px] shadow-[0_2px_12px_hsl(var(--always-black)/5%)]"><table class="bg-bg-100 min-w-full border-separate border-spacing-0 text-sm leading-[1.88888] whitespace-normal"><thead class="border-b-border-100/50 border-b-[0.5px] text-left"><tr class="[tbody>&]:odd:bg-bg-500/10"><th class="text-text-000 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] px-2 [&:not(:first-child)]:border-l-[0.5px]">Section</th><th class="text-text-000 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] px-2 [&:not(:first-child)]:border-l-[0.5px]">Contenu</th></tr></thead><tbody><tr class="[tbody>&]:odd:bg-bg-500/10"><td class="border-t-border-100/50 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] border-t-[0.5px] px-2 [&:not(:first-child)]:border-l-[0.5px]"><strong>Informations générales</strong></td><td class="border-t-border-100/50 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] border-t-[0.5px] px-2 [&:not(:first-child)]:border-l-[0.5px]">Nom, table, workspace, dates création/utilisation, compteur</td></tr><tr class="[tbody>&]:odd:bg-bg-500/10"><td class="border-t-border-100/50 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] border-t-[0.5px] px-2 [&:not(:first-child)]:border-l-[0.5px]"><strong>Configuration d'import</strong></td><td class="border-t-border-100/50 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] border-t-[0.5px] px-2 [&:not(:first-child)]:border-l-[0.5px]">Mode par défaut, clé de matching (si définie)</td></tr><tr class="[tbody>&]:odd:bg-bg-500/10"><td class="border-t-border-100/50 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] border-t-[0.5px] px-2 [&:not(:first-child)]:border-l-[0.5px]"><strong>Colonnes configurées</strong></td><td class="border-t-border-100/50 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] border-t-[0.5px] px-2 [&:not(:first-child)]:border-l-[0.5px]">Tableau avec colonne Zoho, type, alias, format de transformation</td></tr><tr class="[tbody>&]:odd:bg-bg-500/10"><td class="border-t-border-100/50 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] border-t-[0.5px] px-2 [&:not(:first-child)]:border-l-[0.5px]"><strong>Compatibilité</strong></td><td class="border-t-border-100/50 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] border-t-[0.5px] px-2 [&:not(:first-child)]:border-l-[0.5px]">Résultat du matching avec le fichier courant (exact/similar/missing)</td></tr></tbody></table></pre>
+| Section                            | Contenu                                                               |
+| ---------------------------------- | --------------------------------------------------------------------- |
+| **Informations générales** | Nom, table, workspace, dates création/utilisation, compteur          |
+| **Configuration d'import**   | Mode par défaut, clé de matching (si définie)                      |
+| **Colonnes configurées**    | Tableau avec colonne Zoho, type, alias, format de transformation      |
+| **Compatibilité**           | Résultat du matching avec le fichier courant (exact/similar/missing) |
 
 ---
 
@@ -1220,7 +1249,12 @@ Le bouton **"Voir détails"** dans StepProfile ouvre une modale avec les informa
 
 ### 15.1 Scénarios de sauvegarde
 
-<pre class="font-ui border-border-100/50 overflow-x-scroll w-full rounded border-[0.5px] shadow-[0_2px_12px_hsl(var(--always-black)/5%)]"><table class="bg-bg-100 min-w-full border-separate border-spacing-0 text-sm leading-[1.88888] whitespace-normal"><thead class="border-b-border-100/50 border-b-[0.5px] text-left"><tr class="[tbody>&]:odd:bg-bg-500/10"><th class="text-text-000 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] px-2 [&:not(:first-child)]:border-l-[0.5px]">Scénario</th><th class="text-text-000 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] px-2 [&:not(:first-child)]:border-l-[0.5px]">Méthode HTTP</th><th class="text-text-000 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] px-2 [&:not(:first-child)]:border-l-[0.5px]">Données sauvegardées</th></tr></thead><tbody><tr class="[tbody>&]:odd:bg-bg-500/10"><td class="border-t-border-100/50 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] border-t-[0.5px] px-2 [&:not(:first-child)]:border-l-[0.5px]"><strong>Import ponctuel</strong> (skip)</td><td class="border-t-border-100/50 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] border-t-[0.5px] px-2 [&:not(:first-child)]:border-l-[0.5px]">Aucune</td><td class="border-t-border-100/50 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] border-t-[0.5px] px-2 [&:not(:first-child)]:border-l-[0.5px]">-</td></tr><tr class="[tbody>&]:odd:bg-bg-500/10"><td class="border-t-border-100/50 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] border-t-[0.5px] px-2 [&:not(:first-child)]:border-l-[0.5px]"><strong>Nouveau profil</strong></td><td class="border-t-border-100/50 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] border-t-[0.5px] px-2 [&:not(:first-child)]:border-l-[0.5px]">POST /api/profiles</td><td class="border-t-border-100/50 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] border-t-[0.5px] px-2 [&:not(:first-child)]:border-l-[0.5px]">Colonnes + formats résolus + mode + clé</td></tr><tr class="[tbody>&]:odd:bg-bg-500/10"><td class="border-t-border-100/50 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] border-t-[0.5px] px-2 [&:not(:first-child)]:border-l-[0.5px]"><strong>Profil existant</strong></td><td class="border-t-border-100/50 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] border-t-[0.5px] px-2 [&:not(:first-child)]:border-l-[0.5px]">PUT /api/profiles/{id}</td><td class="border-t-border-100/50 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] border-t-[0.5px] px-2 [&:not(:first-child)]:border-l-[0.5px]">lastUsedAt, useCount, nouveaux alias, nouveaux formats</td></tr><tr class="[tbody>&]:odd:bg-bg-500/10"><td class="border-t-border-100/50 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] border-t-[0.5px] px-2 [&:not(:first-child)]:border-l-[0.5px]"><strong>Conflit 409</strong></td><td class="border-t-border-100/50 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] border-t-[0.5px] px-2 [&:not(:first-child)]:border-l-[0.5px]">PUT sur profil existant</td><td class="border-t-border-100/50 [&:not(:first-child)]:-x-[hsla(var(--border-100) / 0.5)] border-t-[0.5px] px-2 [&:not(:first-child)]:border-l-[0.5px]">Colonnes complètes (enrichissement)</td></tr></tbody></table></pre>
+| Scénario                       | Méthode HTTP           | Données sauvegardées                                 |
+| ------------------------------- | ----------------------- | ------------------------------------------------------ |
+| **Import ponctuel**(skip) | Aucune                  | -                                                      |
+| **Nouveau profil**        | POST /api/profiles      | Colonnes + formats résolus + mode + clé              |
+| **Profil existant**       | PUT /api/profiles/{id}  | lastUsedAt, useCount, nouveaux alias, nouveaux formats |
+| **Conflit 409**           | PUT sur profil existant | Colonnes complètes (enrichissement)                   |
 
 ### 15.2 Accumulation des alias
 
@@ -1297,8 +1331,10 @@ Si un utilisateur choisit "Créer un profil" alors qu'un profil existe déjà po
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-
 ---
 
 *Document créé le : 1er décembre 2025*
-*Statut : Version 2.0*
+
+*Mise à jour : 4 décembre 2025 (v2.1 - ajout sections 12-16)*
+
+*Statut : Version 2.1*

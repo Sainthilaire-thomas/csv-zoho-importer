@@ -14,6 +14,7 @@ import type {
   ResolvableIssueType, 
   AutoTransformation,
 } from '@/lib/infrastructure/zoho/types';
+import type { ImportProfile } from '@/types/profiles';
 
 // ==================== TYPES INTERNES ====================
 
@@ -29,6 +30,7 @@ interface ValidateSchemaParams {
   fileHeaders: string[];
   sampleData: string[][];
   zohoSchema: ZohoSchema;
+  profile?: ImportProfile;  // Profil pour skip les issues connues
 }
 
 // ==================== DÉTECTION DES FORMATS ====================
@@ -627,7 +629,8 @@ function generateIssueId(): string {
 export function detectResolvableIssues(
   fileHeaders: string[],
   sampleData: string[][],
-  matchedColumns: ColumnMapping[]
+  matchedColumns: ColumnMapping[],
+  profile?: ImportProfile
 ): ResolvableIssue[] {
   const issues: ResolvableIssue[] = [];
   
@@ -647,14 +650,31 @@ export function detectResolvableIssues(
       const { hasAmbiguous, ambiguousSamples } = hasAmbiguousDates(sampleValues);
       
       if (hasAmbiguous) {
-        issues.push({
-          id: generateIssueId(),
-          type: 'ambiguous_date_format',
-          column: fileCol,
-          message: `Format de date ambigu détecté. Est-ce JJ/MM/AAAA ou MM/JJ/AAAA ?`,
-          sampleValues: ambiguousSamples,
-          resolved: false,
-        });
+        // Verifier si le profil connait deja le format pour cette colonne
+        const profileColumn = profile?.columns.find(c =>
+          c.acceptedNames.some(name =>
+            name.toLowerCase().replace(/[^a-z0-9]/g, '') === fileCol.toLowerCase().replace(/[^a-z0-9]/g, '')
+          )
+        );
+        
+        let formatKnownInProfile = false;
+        if (profileColumn?.config.type === 'date') {
+          const dateConfig = profileColumn.config as { dayMonthOrder?: 'dmy' | 'mdy' };
+          formatKnownInProfile = !!dateConfig.dayMonthOrder;
+        }
+        
+        if (!formatKnownInProfile) {
+          issues.push({
+            id: generateIssueId(),
+            type: 'ambiguous_date_format',
+            column: fileCol,
+            message: `Format de date ambigu détecté. Est-ce JJ/MM/AAAA ou MM/JJ/AAAA ?`,
+            sampleValues: ambiguousSamples,
+            resolved: false,
+          });
+        } else {
+          console.log(`[Schema] Format date connu pour "${fileCol}", skip issue`);
+        }
       }
     }
     
@@ -798,7 +818,7 @@ export function validateSchema(params: ValidateSchemaParams): SchemaValidationRe
   const autoTransformations = detectAutoTransformations(fileHeaders, sampleData, matchedColumns);
   
   // 4. Détecter les problèmes résolubles (⚠️ bloquant)
-  const resolvableIssues = detectResolvableIssues(fileHeaders, sampleData, matchedColumns);
+  const resolvableIssues = detectResolvableIssues(fileHeaders, sampleData, matchedColumns, params.profile);
   
   // 5. Calculer le résumé
   const errorCount = typeWarnings.filter(w => w.severity === 'error').length;

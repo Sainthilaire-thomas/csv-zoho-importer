@@ -5,11 +5,11 @@
 
 **Date début** : 2025-12-02
 
-**Sessions** : 2
+**Sessions** : 3
 
 **Prérequis** : Mission 003 complétée, Mission 004 en pause
 
-**Document de référence** : `docs/specs-profils-import.md`
+**Document de référence** : `docs/specs-profils-import.md` (v2.1)
 
 ---
 
@@ -32,9 +32,75 @@ La mission 004 abordait la validation colonne par colonne à chaque import. L'ap
 
 ---
 
-## 📋 Bilan Session 2 (2025-12-03)
+## 📋 Bilan Session 3 (2025-12-04)
 
 ### ✅ Réalisé cette session
+
+| Composant               | Statut | Description                                           |
+| ----------------------- | ------ | ----------------------------------------------------- |
+| saveOrUpdateProfile()   | ✅     | Fonction complète dans import-wizard.tsx             |
+| Gestion 409             | ✅     | Si profil existe, PUT pour enrichir au lieu d'ignorer |
+| Pré-remplissage config | ✅     | handleProfileSelected remplit workspace/table/mode    |
+| Skip dates connues      | ✅     | detectResolvableIssues() accepte profile optionnel    |
+| Specs v2.1 validées    | ✅     | Modes d'import, clé matching, workflows documentés  |
+| Types corrigés         | ✅     | Erreurs TypeScript IssueResolution, ColumnConfig      |
+
+### 🔧 Modifications techniques
+
+**import-wizard.tsx :**
+
+* Nouveaux états : `profileMode`, `selectedProfile`, `selectedMatchResult`, `detectedColumns`
+* `handleProfileSelected()` : pré-remplit config, skip vers validation si match parfait
+* `handleCreateNewProfile()` : stocke colonnes détectées, mode 'new'
+* `handleSkipProfile()` : import ponctuel sans profil
+* `saveOrUpdateProfile()` : ~150 lignes, gère création/mise à jour/409
+* Appel après `setImportSuccess` dans `handleImport`
+
+**schema-validator.ts :**
+
+* Import `ImportProfile` ajouté
+* `ValidateSchemaParams.profile?: ImportProfile` ajouté
+* `detectResolvableIssues()` accepte `profile` optionnel
+* Logique skip : si `profileColumn.config.dayMonthOrder` existe, pas d'issue créée
+
+### ⚠️ Fix à appliquer
+
+Dans `handleValidation` (~ligne 215), ajouter le profil :
+
+```typescript
+const schemaResult = validateSchema({
+  fileHeaders: headers,
+  sampleData,
+  zohoSchema: schema,
+  profile: selectedProfile || undefined,  // ← MANQUANT
+});
+```
+
+### 📝 Specs mises à jour (v2.1)
+
+Nouvelles sections ajoutées à `specs-profils-import.md` :
+
+| Section                   | Contenu                                        |
+| ------------------------- | ---------------------------------------------- |
+| 12. Modes d'import        | Matrice APPEND/TRUNCATE/UPDATE*, clé matching |
+| 13. Workflows détaillés | 3 chemins (profil existant, nouveau, ponctuel) |
+| 14. Aperçu du profil     | Composant ProfileDetails (à implémenter)     |
+| 15. Flux mise à jour     | Comportement implémenté (accumulation, 409)  |
+| 16. Messages d'erreur     | Textes erreurs profil incomplet                |
+| Règles R11-R15           | Nouvelles règles métier                      |
+
+### Règle d'or validée
+
+> **Un profil = une configuration complète**
+>
+> Mode d'import + clé de matching non modifiables à la volée.
+> Pour un mode différent → créer nouveau profil ou import ponctuel.
+
+---
+
+## 📋 Bilan Session 2 (2025-12-03)
+
+### ✅ Réalisé
 
 | Composant                  | Statut | Description                             |
 | -------------------------- | ------ | --------------------------------------- |
@@ -48,52 +114,15 @@ La mission 004 abordait la validation colonne par colonne à chaque import. L'ap
 | types.ts                   | ✅     | AutoTransformation type ajouté         |
 | Import complet             | ✅     | Flux fonctionnel jusqu'à l'import Zoho |
 
-### 🔄 Flow actuel fonctionnel (validé)
+### 🐛 Bugs corrigés
 
-```
-1. Sélection fichier     ✅ Upload QUITTANCES-03-25-TEST.xlsx
-        ↓
-2. Profil import         ✅ Parsing auto → 22 colonnes détectées → "Créer nouveau"
-        ↓
-3. Configuration         ✅ Sélection table QUITTANCES (viewId: 1718953000024195004)
-        ↓
-4. Validation            ✅ Parse + détecte 2 issues (dates ambiguës)
-        ↓
-5. Résolution            ✅ Choix format JJ/MM/AAAA pour Date début et Date fin
-        ↓
-6. Vérification          ✅ Récap : 14 lignes valides, 22 colonnes, 0 erreur
-        ↓
-7. Import                ✅ 14 lignes importées en 1s vers QUITTANCES
-```
-
-### ⚠️ Problème identifié : Profil non sauvegardé
-
-**Symptôme** : Après import réussi, si on relance un import avec le même fichier, aucun profil n'est proposé.
-
-**Cause** : Les handlers dans import-wizard.tsx ne font que `console.log()` + `goToStep('configuring')` :
-
-```typescript
-onProfileSelected={(profile, matchResult) => {
-  console.log('Profile selected:', profile.name, matchResult);
-  goToStep('configuring');  // ❌ Pas de sauvegarde
-}}
-onCreateNewProfile={(detectedColumns) => {
-  console.log('Create new profile:', detectedColumns.length);
-  goToStep('configuring');  // ❌ Pas de sauvegarde
-}}
-```
-
-**Solution à implémenter** : Après import réussi, appeler POST /api/profiles avec les colonnes + résolutions.
-
-### 🐛 Bugs corrigés cette session
-
-| Bug                          | Cause                                     | Solution                                   |
-| ---------------------------- | ----------------------------------------- | ------------------------------------------ |
-| Écran vide étape 2         | Pas de case 'profiling' dans renderStep() | Ajouté case avec StepProfile              |
-| Property 'id' does not exist | ZohoTable utilise viewId/viewName         | Corrections table-selector.tsx             |
-| Accolades orphelines         | Suppression logs debug a cassé syntaxe   | Restauration Git + nettoyage propre        |
-| parsedData null              | Parsing seulement à validation           | Ajouté parsing auto dans case 'profiling' |
-| Issues non transmises        | resolvedIssues non passé à StepReview   | Ajouté prop resolvedIssues                |
+| Bug                          | Cause                           | Solution                           |
+| ---------------------------- | ------------------------------- | ---------------------------------- |
+| Écran vide étape 2         | Pas de case 'profiling'         | Ajouté case avec StepProfile      |
+| Property 'id' does not exist | ZohoTable utilise viewId        | Corrections table-selector.tsx     |
+| Accolades orphelines         | Suppression logs debug          | Restauration Git                   |
+| parsedData null              | Parsing seulement à validation | Parsing auto dans case 'profiling' |
+| Issues non transmises        | resolvedIssues non passé       | Ajouté prop resolvedIssues        |
 
 ---
 
@@ -122,45 +151,111 @@ onCreateNewProfile={(detectedColumns) => {
 | ProfileManager  | ✅     | `lib/domain/profile/profile-manager.ts` |
 | Index profile   | ✅     | `lib/domain/profile/index.ts`           |
 
-### 🔄 Phase 3 - Interface (EN COURS)
+---
 
-| Composant                   | Statut | Fichier                                       |
-| --------------------------- | ------ | --------------------------------------------- |
-| step-profile.tsx            | ✅     | `components/import/wizard/step-profile.tsx` |
-| import-wizard.tsx modifié  | ✅     | Case 'profiling' + parsing auto               |
-| wizard-progress.tsx         | ✅     | 7 étapes                                     |
-| step-review.tsx             | ✅     | AutoTransformationsSection ajoutée           |
-| step-resolve.tsx            | ✅     | Nettoyé (3 types bloquants seulement)        |
-| **Sauvegarde profil** | ❌     | Handlers vides, à implémenter               |
+## 📊 État actuel des phases
+
+### ✅ Phase 1 - Infrastructure (TERMINÉE)
+
+### ✅ Phase 2 - Services métier (TERMINÉE)
+
+### 🔄 Phase 3 - Interface (90% TERMINÉE)
+
+| Composant                    | Statut | Description                         |
+| ---------------------------- | ------ | ----------------------------------- |
+| step-profile.tsx             | ✅     | Composant complet                   |
+| import-wizard.tsx            | ✅     | Intégration profiling + sauvegarde |
+| wizard-progress.tsx          | ✅     | 7 étapes                           |
+| step-review.tsx              | ✅     | AutoTransformationsSection          |
+| step-resolve.tsx             | ✅     | 3 types bloquants                   |
+| Sauvegarde profil            | ✅     | saveOrUpdateProfile()               |
+| Pré-remplissage             | ✅     | handleProfileSelected()             |
+| **Fix validateSchema** | ❌     | Passer profile à validateSchema    |
 
 ### ⏳ Phase 4 - Intégration complète (À FAIRE)
 
-| Composant              | Statut | Description                      |
-| ---------------------- | ------ | -------------------------------- |
-| Sauvegarde profil      | ❌     | Persister après import réussi  |
-| Matching profil        | ❌     | Proposer profils existants       |
-| Réutilisation formats | ❌     | Skip résolution si format connu |
-| Test accumulation      | ❌     | Vérifier ajout alias            |
+| Composant                | Statut | Description                                 |
+| ------------------------ | ------ | ------------------------------------------- |
+| Fix validateSchema       | ❌     | Ajouter `profile: selectedProfile`        |
+| Migration BDD            | ❌     | `ALTER TABLE ADD matching_columns TEXT[]` |
+| Sélecteur clé matching | ❌     | Dans StepConfig si mode UPDATE*             |
+| Validation mode + clé   | ❌     | Bloquer si profil UPDATE* sans clé         |
+| Composant ProfileDetails | ❌     | Modale aperçu profil                       |
+| Test accumulation alias  | ❌     | Vérifier ajout automatique                 |
 
 ---
 
-## 🗂️ Fichiers modifiés (Session 2)
+## ⏳ Reste à faire (Prochaine session)
 
-### Fichiers modifiés (à commiter)
+### Priorité 1 : Fix validateSchema (5 min)
 
-```
-components/import/table-selector.tsx       # viewId au lieu de id
-components/import/wizard/import-wizard.tsx # Intégration profiling + resolvedIssues
-components/import/wizard/step-resolve.tsx  # 3 types bloquants seulement
-components/import/wizard/step-review.tsx   # AutoTransformationsSection
-components/import/wizard/wizard-progress.tsx # 7 étapes
-lib/domain/schema-validator.ts             # detectAutoTransformations()
-lib/hooks/use-import.ts                    # Navigation selecting → profiling
-lib/infrastructure/zoho/types.ts           # AutoTransformation type
-types/index.ts                             # ImportStatus avec 'profiling'
+```typescript
+// Dans handleValidation, ligne ~215
+const schemaResult = validateSchema({
+  fileHeaders: headers,
+  sampleData,
+  zohoSchema: schema,
+  profile: selectedProfile || undefined,  // ← AJOUTER
+});
 ```
 
-### Fichiers créés (Session 1, non trackés)
+### Priorité 2 : Migration BDD (10 min)
+
+```sql
+ALTER TABLE csv_importer.import_profiles 
+ADD COLUMN matching_columns TEXT[] DEFAULT NULL;
+
+COMMENT ON COLUMN csv_importer.import_profiles.matching_columns IS 
+  'Colonnes formant la clé unique pour les modes UPDATEADD, DELETEUPSERT, ONLYADD';
+```
+
+### Priorité 3 : Sélecteur clé matching (30 min)
+
+Dans StepConfig, si mode UPDATEADD/DELETEUPSERT/ONLYADD :
+
+* Afficher liste de checkboxes avec colonnes du fichier
+* Stocker dans `matchingColumns` local
+* Passer à la sauvegarde du profil
+
+### Priorité 4 : Validation mode + clé (30 min)
+
+Dans handleProfileSelected :
+
+* Si profil.defaultImportMode est UPDATE* et matchingColumns vide
+* Afficher erreur "Profil incomplet"
+* Proposer : créer nouveau profil ou import ponctuel
+
+### Priorité 5 : Composant ProfileDetails (1h)
+
+Modale affichant :
+
+* Informations générales (nom, table, dates)
+* Configuration import (mode, clé matching)
+* Colonnes configurées (tableau)
+* Compatibilité avec fichier actuel
+
+---
+
+## 🗂️ Fichiers modifiés (Session 3)
+
+### Fichiers modifiés
+
+```
+components/import/wizard/import-wizard.tsx  # +150 lignes (sauvegarde profil)
+lib/domain/schema-validator.ts              # +30 lignes (skip dates connues)
+```
+
+### Fichiers créés
+
+```
+docs/specs-profils-import.md                # v2.1 (sections 12-16 ajoutées)
+```
+
+---
+
+## 🗂️ Fichiers créés/modifiés (Sessions 1-2)
+
+### Fichiers créés (Session 1)
 
 ```
 app/api/profiles/route.ts
@@ -172,80 +267,22 @@ lib/domain/detection/index.ts
 lib/domain/profile/profile-manager.ts
 lib/domain/profile/index.ts
 types/profiles.ts
+docs/sql/003-import-profiles.sql
 ```
 
----
+### Fichiers modifiés (Session 2)
 
-## ⏳ Reste à faire (Prochaine session)
-
-### Priorité 1 : Sauvegarde du profil après import
-
-```typescript
-// Dans import-wizard.tsx, modifier handleImport :
-const handleImport = async () => {
-  // ... import existant ...
-  
-  if (result.success && shouldCreateProfile) {
-    // Construire l'objet profil
-    const profileData = {
-      name: `Import ${state.config.table?.viewName}`,
-      workspaceId: state.config.workspace?.workspaceId,
-      workspaceName: state.config.workspace?.workspaceName,
-      viewId: state.config.table?.viewId,
-      viewName: state.config.table?.viewName,
-      columns: detectedColumns.map(col => ({
-        ...col,
-        // Inclure les résolutions (format date choisi, etc.)
-        dateFormat: resolvedIssues?.find(i => i.columnName === col.name)?.resolution
-      })),
-      defaultImportMode: state.config.importMode
-    };
-  
-    await fetch('/api/profiles', {
-      method: 'POST',
-      body: JSON.stringify(profileData)
-    });
-  }
-};
 ```
-
-### Priorité 2 : Reconnaissance de profil existant
-
-```typescript
-// Dans step-profile.tsx, au mount :
-useEffect(() => {
-  const findProfiles = async () => {
-    const response = await fetch('/api/profiles/match', {
-      method: 'POST',
-      body: JSON.stringify({ fileColumns: detectedColumns })
-    });
-    const { data } = await response.json();
-    if (data.length > 0 && data[0].score >= 0.8) {
-      setMatchingProfile(data[0].profile);
-    }
-  };
-  findProfiles();
-}, [detectedColumns]);
+components/import/table-selector.tsx
+components/import/wizard/import-wizard.tsx
+components/import/wizard/step-resolve.tsx
+components/import/wizard/step-review.tsx
+components/import/wizard/wizard-progress.tsx
+lib/domain/schema-validator.ts
+lib/hooks/use-import.ts
+lib/infrastructure/zoho/types.ts
+types/index.ts
 ```
-
-### Priorité 3 : Skip résolution si format connu
-
-```typescript
-// Dans schema-validator.ts, detectIssues() :
-if (profile?.columns) {
-  const profileColumn = profile.columns.find(c => c.name === columnName);
-  if (profileColumn?.dateFormat) {
-    // Ne pas créer d'issue ambiguous_date_format
-    // Appliquer directement le format du profil
-    return;
-  }
-}
-```
-
-### Priorité 4 : Amélioration UX (plus tard)
-
-* Afficher tableau entrée → transformation → sortie
-* Preview des 5 premières lignes transformées
 
 ---
 
@@ -256,23 +293,22 @@ cd "C:\Users\thoma\OneDrive\SONEAR_2025\csv-zoho-importer"
 npm run dev
 ```
 
-### Commiter les modifications actuelles
+### Commiter les modifications
 
 ```powershell
 git add -A
-git commit -m "feat(mission-005): intégration step-profile + flux complet import
+git commit -m "feat(mission-005): sauvegarde profil + skip formats connus
 
-- Ajout étape 'profiling' dans wizard (7 étapes)
-- Parsing automatique avant affichage profil
-- Correction viewId/viewName dans table-selector
-- Correction resolvedIssues passé à StepReview
-- detectAutoTransformations() dans schema-validator
-- Import complet validé (14 lignes QUITTANCES)
+- saveOrUpdateProfile() après import réussi
+- Gestion 409 : PUT pour enrichir profil existant
+- handleProfileSelected() pré-remplit config
+- detectResolvableIssues() accepte profile pour skip dates
+- Specs v2.1 : modes import, clé matching, workflows
 
-Reste à faire: sauvegarde profil après import"
+Reste: fix validateSchema, migration matching_columns, ProfileDetails"
 ```
 
-### Vérifier les profils existants
+### Vérifier profil en base
 
 ```javascript
 // Console navigateur
@@ -283,53 +319,76 @@ fetch('/api/profiles').then(r => r.json()).then(console.log)
 
 ## 📊 Métriques
 
-| Métrique          | Session 1 | Session 2      | Total |
-| ------------------ | --------- | -------------- | ----- |
-| Fichiers créés   | ~9        | 0              | ~9    |
-| Fichiers modifiés | 0         | 11             | 11    |
-| Lignes de code     | ~1890     | ~200           | ~2090 |
-| Bugs corrigés     | 0         | 5              | 5     |
-| Tests manuels      | API CRUD  | Import complet | ✅    |
+| Métrique          | Session 1 | Session 2      | Session 3      | Total |
+| ------------------ | --------- | -------------- | -------------- | ----- |
+| Fichiers créés   | ~9        | 0              | 1              | ~10   |
+| Fichiers modifiés | 0         | 11             | 2              | 13    |
+| Lignes de code     | ~1890     | ~200           | ~180           | ~2270 |
+| Bugs corrigés     | 0         | 5              | 3              | 8     |
+| Tests manuels      | API CRUD  | Import complet | Profil reconnu | ✅    |
 
 ---
 
 ## 📝 Notes techniques
 
-### Transformations automatiques
+### Flow profil implémenté
 
-Le tableau `autoTransformations` était vide lors du test car le fichier Excel avait déjà des données normalisées :
+```
+Upload fichier
+     ↓
+Étape Profil → Matching profils existants
+     ↓
+┌────────────────────┬────────────────────┬────────────────────┐
+│ Profil existant    │ Nouveau profil     │ Import ponctuel    │
+│ handleProfileSelected│ handleCreateNewProfile│ handleSkipProfile │
+│ profileMode='existing'│ profileMode='new' │ profileMode='skip' │
+└────────────────────┴────────────────────┴────────────────────┘
+     ↓
+Étape Config (pré-remplie si profil existant)
+     ↓
+Validation → Résolution (skip si format connu)
+     ↓
+Import Zoho
+     ↓
+saveOrUpdateProfile() si profileMode !== 'skip'
+```
 
-* Nombres : `35.0` (point décimal, pas virgule française)
-* Durées : `23:54:50` (format complet HH:mm:ss)
-* Dates : `05/03/2025` (ambiguës, nécessitent confirmation)
+### Gestion des conflits 409
 
-Pour tester les transformations automatiques, il faudrait un fichier CSV brut avec formats français.
+Quand POST /api/profiles retourne 409 (profil existe déjà pour cette table) :
 
-### Types de transformations
+1. Récupérer `existingProfileId` de la réponse
+2. Faire PUT /api/profiles/{id} avec les colonnes
+3. Log "Profil existant mis à jour"
+4. Continuer normalement (non bloquant)
 
-| Type                  | Affichage    | Bloquant | Exemple            |
-| --------------------- | ------------ | -------- | ------------------ |
-| decimal_comma         | 🔄 Info      | Non      | 1234,56 → 1234.56 |
-| short_duration        | 🔄 Info      | Non      | 23:54 → 23:54:00  |
-| thousands_separator   | 🔄 Info      | Non      | 1 234 → 1234      |
-| ambiguous_date_format | ⚠️ Confirm | Oui      | 05/03/2025 → ?    |
-| scientific_notation   | ⚠️ Confirm | Oui      | 1E6 → 1000000     |
-| iso_date              | ⚠️ Confirm | Oui      | 2025-03-05 → ?    |
+### Types corrigés (Session 3)
+
+```typescript
+// IssueResolution est un union type
+issue.resolution?.type === 'date_format' ? issue.resolution.format : 'DD/MM/YYYY'
+
+// ColumnConfig est un union type - cast après vérification
+if (profileColumn?.config.type === 'date') {
+  const dateConfig = profileColumn.config as { dayMonthOrder?: 'dmy' | 'mdy' };
+  formatKnownInProfile = !!dateConfig.dayMonthOrder;
+}
+```
 
 ---
 
 ## 🔗 Documents de référence
 
-| Document                          | Description                             |
-| --------------------------------- | --------------------------------------- |
-| `docs/specs-profils-import.md`  | Spécifications complètes (945 lignes) |
-| `docs/architecture-cible-v3.md` | Architecture technique                  |
-| `docs/base-context.md`          | Contexte projet                         |
+| Document                          | Description                        |
+| --------------------------------- | ---------------------------------- |
+| `docs/specs-profils-import.md`  | Spécifications v2.1 (16 sections) |
+| `docs/architecture-cible-v3.md` | Architecture technique             |
+| `docs/base-context.md`          | Contexte projet                    |
 
 ---
 
 *Mission créée le : 2025-12-02*
 
-*Dernière mise à jour : 2025-12-03 19:20*
+*Dernière mise à jour : 2025-12-04 11:30*
 
-*Statut : 🔄 En cours (Phase 1-2 terminées, Phase 3 quasi-terminée, Phase 4 à faire)*
+*Statut : 🔄 En cours (Phase 1-2 ✅, Phase 3 90%, Phase 4 ⏳)*
