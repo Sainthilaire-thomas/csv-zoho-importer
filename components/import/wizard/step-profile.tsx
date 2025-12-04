@@ -4,24 +4,29 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { 
-  CheckCircle, 
-  AlertCircle, 
-  Plus, 
+import {
+  CheckCircle,
+  AlertCircle,
+  Plus,
   FileSpreadsheet,
   Loader2,
   ChevronRight,
   Settings,
-  Zap
+  Zap,
+  Edit,
+  Trash2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { 
-  ImportProfile, 
-  ProfileMatchResult, 
+import { ConfirmDialog } from '@/components/ui/dialog';
+import { ProfileEditDialog } from '@/components/import/profile-edit-dialog';
+import {
+  ImportProfile,
+  ProfileMatchResult,
   DetectedColumn,
-  ColumnMapping 
+  ColumnMapping
 } from '@/types/profiles';
+import type { ImportMode } from '@/types';
 import { detectColumnTypes } from '@/lib/domain/detection';
 import { 
   profileManager, 
@@ -153,14 +158,14 @@ export function StepProfile({
       {/* Contenu selon le mode */}
       {viewMode === 'loading' && <LoadingView />}
       {viewMode === 'error' && <ErrorView error={error} onRetry={analyzeFileAndFindProfiles} />}
-      {viewMode === 'matches' && (
+        {viewMode === 'matches' && (
         <MatchesView
           matches={matchResults}
           selectedMatch={selectedMatch}
           onSelectMatch={setSelectedMatch}
           onUseProfile={handleUseProfile}
-          onCreateNew={handleCreateNew}
           onSkip={handleSkip}
+          onProfileUpdated={analyzeFileAndFindProfiles}
         />
       )}
       {viewMode === 'no-match' && (
@@ -234,8 +239,8 @@ interface MatchesViewProps {
   selectedMatch: ProfileMatchResult | null;
   onSelectMatch: (match: ProfileMatchResult) => void;
   onUseProfile: () => void;
-  onCreateNew: () => void;
   onSkip: () => void;
+  onProfileUpdated: () => void;
 }
 
 function MatchesView({
@@ -243,15 +248,56 @@ function MatchesView({
   selectedMatch,
   onSelectMatch,
   onUseProfile,
-  onCreateNew,
-  onSkip
+  onSkip,
+  onProfileUpdated
 }: MatchesViewProps) {
+  const [showEditDialog, setShowEditDialog] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
   const bestMatch = matches[0];
   const percentage = getMatchPercentage(bestMatch);
   const needsConfirmation = bestMatch.needsConfirmation;
   const confirmColumns = getColumnsNeedingConfirmation(bestMatch);
   const newColumns = getNewColumns(bestMatch);
   const missingColumns = getMissingColumns(bestMatch);
+  const handleEditSave = async (updates: {
+    name: string;
+    description?: string;
+    defaultImportMode: ImportMode;
+    matchingColumns: string[] | null;
+  }) => {
+    const response = await fetch(`/api/profiles/${bestMatch.profile.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Erreur lors de la mise à jour');
+    }
+    onProfileUpdated();
+  };
+
+  const handleDelete = async () => {
+    setIsDeleting(true);
+    try {
+      const response = await fetch(`/api/profiles/${bestMatch.profile.id}`, {
+        method: 'DELETE',
+      });
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Erreur lors de la suppression');
+      }
+      setShowDeleteDialog(false);
+      onProfileUpdated();
+    } catch (err) {
+      console.error('Erreur suppression:', err);
+      alert(err instanceof Error ? err.message : 'Erreur lors de la suppression');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -332,15 +378,62 @@ function MatchesView({
             </div>
           )}
 
-          {/* Dernière utilisation */}
+        
+            {/* Dernière utilisation */}
           {bestMatch.profile.lastUsedAt && (
             <p className="mt-3 text-xs text-muted-foreground">
               Dernière utilisation : {new Date(bestMatch.profile.lastUsedAt).toLocaleDateString('fr-FR')}
               {bestMatch.profile.useCount > 0 && ` • ${bestMatch.profile.useCount} import(s)`}
             </p>
           )}
+
+          {/* Actions du profil */}
+          <div className="flex gap-2 mt-4 pt-3 border-t">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowEditDialog(true);
+              }}
+            >
+              <Edit className="h-4 w-4 mr-1" />
+              Modifier
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowDeleteDialog(true);
+              }}
+              className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20"
+            >
+              <Trash2 className="h-4 w-4 mr-1" />
+              Supprimer
+            </Button>
+          </div>
         </CardContent>
       </Card>
+
+      {/* Dialogs */}
+      <ProfileEditDialog
+        open={showEditDialog}
+        onClose={() => setShowEditDialog(false)}
+        profile={bestMatch.profile}
+        onSave={handleEditSave}
+      />
+
+      <ConfirmDialog
+        open={showDeleteDialog}
+        onClose={() => setShowDeleteDialog(false)}
+        onConfirm={handleDelete}
+        title="Supprimer le profil"
+        description={`Êtes-vous sûr de vouloir supprimer le profil "${bestMatch.profile.name}" ? Cette action est irréversible.`}
+        confirmText="Supprimer"
+        variant="danger"
+        isLoading={isDeleting}
+      />
 
       
      {/* Option import ponctuel */}
