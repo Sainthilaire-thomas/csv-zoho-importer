@@ -142,7 +142,7 @@ export async function POST(request: NextRequest) {
     }));
     
     // Préparer les données pour insertion
-    const insertData = {
+        const insertData = {
       name: body.name.trim(),
       description: body.description?.trim() || null,
       workspace_id: body.workspaceId,
@@ -151,6 +151,7 @@ export async function POST(request: NextRequest) {
       view_name: body.viewName,
       columns: columnsWithIds,
       default_import_mode: body.defaultImportMode || 'append',
+      matching_columns: body.matchingColumns || null,
       created_by: user.id
     };
     

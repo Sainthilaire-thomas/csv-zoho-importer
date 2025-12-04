@@ -1,6 +1,6 @@
 ﻿# Structure du projet - csv-zoho-importer
 
-*Genere le 2025-12-04 09:44:12*
+*Genere le 2025-12-04 12:12:10*
 ```
 csv-zoho-importer/
 |-- .vscode/
@@ -110,6 +110,7 @@ csv-zoho-importer/
 |   |-- project-structure.md
 |   |-- specs-fonctionnelles.md
 |   |-- specs-profils-import.md
+|   |-- specs-profils-import-v2.1.md
 |   +-- specs-validation-avancee.md
 |-- lib/
 |   |-- domain/

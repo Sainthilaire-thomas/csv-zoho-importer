@@ -89,6 +89,7 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
   const [selectedProfile, setSelectedProfile] = useState<ImportProfile | null>(null);
   const [selectedMatchResult, setSelectedMatchResult] = useState<ProfileMatchResult | null>(null);
   const [detectedColumns, setDetectedColumns] = useState<DetectedColumn[]>([]);
+ const [matchingColumns, setMatchingColumns] = useState<string[]>([]);
 
   // Charger les workspaces au montage
   useEffect(() => {
@@ -392,7 +393,7 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
         };
       });
 
-      const profilePayload = {
+     const profilePayload = {
         name: `Import ${state.config.tableName} - ${new Date().toLocaleDateString('fr-FR')}`,
         workspaceId: selectedWorkspaceId,
         workspaceName: workspace.name,
@@ -400,6 +401,7 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
         viewName: state.config.tableName,
         columns: profileColumns,
         defaultImportMode: state.config.importMode,
+        matchingColumns: matchingColumns.length > 0 ? matchingColumns : null,
       };
 
       const response = await fetch('/api/profiles', {
@@ -416,11 +418,13 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
           console.log('Profil existant trouvé, mise à jour:', result.existingProfileId);
           
           // Faire un PUT pour mettre à jour le profil existant
-          const updateResponse = await fetch(`/api/profiles/${result.existingProfileId}`, {
+           const updateResponse = await fetch(`/api/profiles/${result.existingProfileId}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               columns: profileColumns,
+              defaultImportMode: state.config.importMode,
+              matchingColumns: matchingColumns.length > 0 ? matchingColumns : null,
               lastUsedAt: new Date().toISOString(),
               useCount: 1,
             }),
@@ -438,7 +442,7 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
         console.log('Nouveau profil cree:', result.data?.id);
       }
     }
-  }, [profileMode, selectedProfile, selectedMatchResult, resolvedIssues, detectedColumns, selectedWorkspaceId, workspaces, state.config]);
+  }, [profileMode, selectedProfile, selectedMatchResult, resolvedIssues, detectedColumns, selectedWorkspaceId, workspaces, state.config, matchingColumns]);
 
   const handleImport = useCallback(async () => {
     if (!parsedData || !state.config.tableId || !state.validation) return;
@@ -463,7 +467,7 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
       const response = await fetch('/api/zoho/import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+           body: JSON.stringify({
           workspaceId: selectedWorkspaceId,
           tableId: state.config.tableId,
           tableName: state.config.tableName,
@@ -471,6 +475,7 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
           csvData: csvData,
           fileName: state.config.file?.name,
           totalRows: validData.length,
+          matchingColumns: matchingColumns.length > 0 ? matchingColumns : undefined,
         }),
       });
 
@@ -526,9 +531,10 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
     setSelectedMatchResult(matchResult);
     setProfileMode('existing');
     
-    setSelectedWorkspaceId(profile.workspaceId);
+       setSelectedWorkspaceId(profile.workspaceId);
     setTable(profile.viewId, profile.viewName);
     setImportMode(profile.defaultImportMode);
+    setMatchingColumns(profile.matchingColumns || []);
     
     if (!matchResult.needsConfirmation) {
       goToStep('validating');
@@ -542,6 +548,7 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
     setDetectedColumns(columns);
     setProfileMode('new');
     setSelectedProfile(null);
+     setMatchingColumns([]);
     goToStep('configuring');
   }, [goToStep]);
 
@@ -550,6 +557,7 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
     setDetectedColumns(columns);
     setProfileMode('skip');
     setSelectedProfile(null);
+     setMatchingColumns([]);
     goToStep('configuring');
   }, [goToStep]);
 
@@ -618,7 +626,7 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
               </Alert>
             )}
 
-            <StepConfig
+           <StepConfig
               fileName={state.config.file?.name ?? ''}
               fileSize={state.config.file?.size ?? 0}
               workspaces={workspaces}
@@ -632,6 +640,9 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
               onBack={goBack}
               onNext={() => goToStep('validating')}
               canProceed={canGoNext && !!selectedWorkspaceId}
+              matchingColumns={matchingColumns}
+              onMatchingColumnsChange={setMatchingColumns}
+              availableColumns={detectedColumns.map(c => c.name)}
             />
           </>
         );

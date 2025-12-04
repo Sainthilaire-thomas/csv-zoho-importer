@@ -1,10 +1,9 @@
 // components/import/wizard/step-config.tsx
 'use client';
-
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Alert } from '@/components/ui/alert';
-import { ArrowLeft, ArrowRight, Database, Loader2, Building2 } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Database, Loader2, Building2, Key } from 'lucide-react';
 import { TableSelectorAccordion } from '@/components/import/table-selector-accordion';
 import type { ImportMode } from '@/types';
 
@@ -21,7 +20,7 @@ interface StepConfigProps {
   selectedWorkspaceId: string;
   isLoadingWorkspaces: boolean;
   onWorkspaceSelect: (workspaceId: string) => void;
-  // Tables - on garde selectedTableId pour l'état global
+  // Tables
   selectedTableId: string;
   importMode: ImportMode;
   onTableSelect: (tableId: string, tableName: string) => void;
@@ -29,6 +28,10 @@ interface StepConfigProps {
   onBack: () => void;
   onNext: () => void;
   canProceed: boolean;
+  // Matching columns (pour modes UPDATE*)
+  matchingColumns: string[];
+  onMatchingColumnsChange: (columns: string[]) => void;
+  availableColumns: string[];
 }
 
 const IMPORT_MODES: { value: ImportMode; label: string; description: string }[] = [
@@ -59,6 +62,9 @@ const IMPORT_MODES: { value: ImportMode; label: string; description: string }[] 
   },
 ];
 
+// Modes nécessitant une clé de matching
+const MODES_REQUIRING_KEY: ImportMode[] = ['updateadd', 'deleteupsert', 'onlyadd'];
+
 function formatFileSize(bytes: number): string {
   if (bytes === 0) return '0 B';
   const k = 1024;
@@ -81,14 +87,32 @@ export function StepConfig({
   onBack,
   onNext,
   canProceed,
+  matchingColumns,
+  onMatchingColumnsChange,
+  availableColumns,
 }: StepConfigProps) {
   const handleWorkspaceChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     onWorkspaceSelect(e.target.value);
-    // Reset la sélection de table quand on change de workspace
     onTableSelect('', '');
   };
 
+  const handleColumnToggle = (columnName: string) => {
+    if (matchingColumns.includes(columnName)) {
+      onMatchingColumnsChange(matchingColumns.filter(c => c !== columnName));
+    } else {
+      onMatchingColumnsChange([...matchingColumns, columnName]);
+    }
+  };
+
   const requiresConfirmation = importMode === 'truncateadd' || importMode === 'deleteupsert';
+  const requiresMatchingKey = MODES_REQUIRING_KEY.includes(importMode);
+  const hasMatchingKey = matchingColumns.length > 0;
+  
+  // Bloquer si mode UPDATE* sans clé de matching
+  const canProceedFinal = canProceed && 
+    !!selectedWorkspaceId && 
+    !!selectedTableId &&
+    (!requiresMatchingKey || hasMatchingKey);
 
   return (
     <Card>
@@ -199,6 +223,59 @@ export function StepConfig({
           </div>
         </div>
 
+        {/* Sélecteur de clé de matching - affiché si mode UPDATE* */}
+        {requiresMatchingKey && (
+          <div className="space-y-3">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+              <Key className="inline h-4 w-4 mr-1" />
+              Clé de matching (colonnes uniques) *
+            </label>
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              Sélectionnez les colonnes qui identifient de manière unique chaque ligne.
+              Ces colonnes seront utilisées pour détecter les lignes existantes.
+            </p>
+            
+            {availableColumns.length === 0 ? (
+              <Alert variant="info">
+                Les colonnes seront disponibles après le parsing du fichier.
+              </Alert>
+            ) : (
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-2 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg max-h-48 overflow-y-auto">
+                {availableColumns.map((col) => (
+                  <label
+                    key={col}
+                    className={`flex items-center gap-2 p-2 rounded cursor-pointer transition-colors
+                      ${matchingColumns.includes(col)
+                        ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300'
+                        : 'hover:bg-gray-100 dark:hover:bg-gray-700'
+                      }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={matchingColumns.includes(col)}
+                      onChange={() => handleColumnToggle(col)}
+                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span className="text-sm truncate" title={col}>{col}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+            
+            {matchingColumns.length > 0 && (
+              <div className="text-sm text-green-600 dark:text-green-400">
+                Clé sélectionnée : {matchingColumns.join(' + ')}
+              </div>
+            )}
+            
+            {!hasMatchingKey && (
+              <Alert variant="warning">
+                Vous devez sélectionner au moins une colonne pour la clé de matching.
+              </Alert>
+            )}
+          </div>
+        )}
+
         {/* Warning pour modes destructifs */}
         {requiresConfirmation && (
           <Alert variant="warning" title="Attention">
@@ -214,7 +291,7 @@ export function StepConfig({
           </Button>
           <Button
             onClick={onNext}
-            disabled={!canProceed || !selectedWorkspaceId || !selectedTableId}
+            disabled={!canProceedFinal}
             rightIcon={<ArrowRight className="h-4 w-4" />}
           >
             Valider et continuer

@@ -342,46 +342,26 @@ function MatchesView({
         </CardContent>
       </Card>
 
-      {/* Autres options */}
-      <div className="grid grid-cols-2 gap-3">
-        <Card 
-          className="cursor-pointer hover:border-primary/50 transition-colors"
-          onClick={onCreateNew}
-        >
-          <CardContent className="py-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-full bg-muted">
-                <Plus className="h-5 w-5" />
-              </div>
-              <div>
-                <p className="font-medium text-sm">Créer un nouveau profil</p>
-                <p className="text-xs text-muted-foreground">
-                  Configurer manuellement
-                </p>
-              </div>
+      
+     {/* Option import ponctuel */}
+      <Card
+        className="cursor-pointer hover:border-primary/50 transition-colors"
+        onClick={onSkip}
+      >
+        <CardContent className="py-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-full bg-muted">
+              <Zap className="h-5 w-5" />
             </div>
-          </CardContent>
-        </Card>
-
-        <Card 
-          className="cursor-pointer hover:border-primary/50 transition-colors"
-          onClick={onSkip}
-        >
-          <CardContent className="py-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-full bg-muted">
-                <Zap className="h-5 w-5" />
-              </div>
-              <div>
-                <p className="font-medium text-sm">Import ponctuel</p>
-                <p className="text-xs text-muted-foreground">
-                  Sans mémoriser de profil
-                </p>
-              </div>
+            <div>
+              <p className="font-medium text-sm">Import ponctuel</p>
+              <p className="text-xs text-muted-foreground">
+                Importer sans utiliser le profil existant
+              </p>
             </div>
-          </CardContent>
-        </Card>
-      </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Autres profils compatibles */}
       {matches.length > 1 && (

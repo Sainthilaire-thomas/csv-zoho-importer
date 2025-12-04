@@ -50,6 +50,7 @@ export interface ImportProfile {
   
   // Paramètres par défaut
   defaultImportMode: ImportMode;
+  matchingColumns?: string[];  
   
   // Métadonnées
   createdAt: Date;
@@ -313,8 +314,9 @@ export interface CreateProfilePayload {
   workspaceName: string;
   viewId: string;
   viewName: string;
-  columns: Omit<ProfileColumn, 'id'>[];
+ columns: Omit<ProfileColumn, 'id'>[];
   defaultImportMode?: ImportMode;
+  matchingColumns?: string[] | null;
 }
 
 /**
@@ -323,8 +325,9 @@ export interface CreateProfilePayload {
 export interface UpdateProfilePayload {
   name?: string;
   description?: string;
-  columns?: ProfileColumn[];
+    columns?: ProfileColumn[];
   defaultImportMode?: ImportMode;
+  matchingColumns?: string[] | null;
 }
 
 /**
@@ -351,6 +354,7 @@ export interface ImportProfileRow {
   view_name: string;
   columns: ProfileColumn[];           // JSONB
   default_import_mode: ImportMode;
+  matching_columns: string[] | null; 
   created_at: string;
   created_by: string;
   updated_at: string;
@@ -372,6 +376,7 @@ export function rowToProfile(row: ImportProfileRow): ImportProfile {
     viewName: row.view_name,
     columns: row.columns,
     defaultImportMode: row.default_import_mode,
+    matchingColumns: row.matching_columns ?? undefined,
     createdAt: new Date(row.created_at),
     createdBy: row.created_by,
     updatedAt: new Date(row.updated_at),
@@ -395,6 +400,7 @@ export function profileToRow(
     view_name: profile.viewName,
     columns: profile.columns,
     default_import_mode: profile.defaultImportMode,
+    matching_columns: profile.matchingColumns ?? null,
     created_by: profile.createdBy,
   };
 }

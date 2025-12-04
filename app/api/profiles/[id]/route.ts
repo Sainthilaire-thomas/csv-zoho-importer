@@ -133,6 +133,10 @@ export async function PUT(
       updateData.default_import_mode = body.defaultImportMode;
     }
     
+     if ('matchingColumns' in body) {
+      updateData.matching_columns = (body as { matchingColumns?: string[] | null }).matchingColumns ?? null;
+    }
+    
     // Mise à jour après import (ProfileUpdateFromImport)
     if ('newAliases' in body || 'newFormats' in body) {
       const currentColumns = existingProfile.columns as unknown[];
