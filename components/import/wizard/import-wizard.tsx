@@ -10,6 +10,7 @@ import { StepValidate } from './step-validate';
 import { StepReview } from './step-review';
 import { StepResolve } from './step-resolve';
 import { StepConfirm } from './step-confirm';
+import { StepTransformPreview } from './step-transform-preview';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { useImport } from '@/lib/hooks/use-import';
@@ -653,6 +654,18 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
             progress={state.progress}
             fileName={state.config.file?.name ?? ''}
             onValidationStart={handleValidation}
+          />
+        );
+
+        case 'previewing':
+        return (
+          <StepTransformPreview
+            autoTransformations={schemaValidation?.autoTransformations || []}
+            matchedColumns={schemaValidation?.matchedColumns || []}
+            parsedData={parsedData || []}
+            totalRows={state.validation?.totalRows || 0}
+            onBack={() => goToStep('configuring')}
+            onConfirm={() => goToStep('reviewing')}
           />
         );
 

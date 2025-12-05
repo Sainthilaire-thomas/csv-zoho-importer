@@ -1,0 +1,383 @@
+# 🎯 Mission 006: Preview des Transformations
+
+*Créée le 2025-12-04*
+*Statut : 🆕 Nouvelle*
+
+---
+
+## Objectif
+
+Ajouter une étape de **prévisualisation des transformations** dans le wizard d'import, permettant à l'utilisateur de voir exactement comment ses données seront modifiées avant l'envoi à Zoho Analytics.
+
+---
+
+## Contexte
+
+### Mission précédente
+
+* Lien : `missions/mission-005-profils-import.md`
+* Statut : ✅ Complétée (4 sessions)
+* Points clés : Système de profils d'import complet avec matching intelligent, édition/suppression, clé de matching pour modes UPDATE*
+
+### Documents de référence
+
+* `docs/specs-preview-verification.md` - Spécification détaillée (à créer)
+* `docs/specs-profils-import-v2.1.md` - Formats universels et transformations
+* `docs/architecture-cible-v3.md` - Architecture technique
+
+### État actuel
+
+Le wizard actuel (7 étapes) applique les transformations de manière transparente mais l'utilisateur ne voit pas le détail de ce qui sera modifié. Il doit faire confiance au système sans pouvoir vérifier.
+
+---
+
+## Problème à résoudre
+
+### Situation actuelle
+
+```
+Fichier source          Envoyé à Zoho
+┌─────────────┐         ┌─────────────┐
+│ 05/03/2025  │   ???   │ 2025-03-05  │
+│ 1 234,56    │  ───▶   │ 1234.56     │
+│ 9:30        │         │ 09:30:00    │
+└─────────────┘         └─────────────┘
+    
+L'utilisateur ne voit pas ces transformations
+```
+
+### Solution proposée
+
+```
+Fichier source     Transformation          Envoyé à Zoho
+┌─────────────┐    ┌─────────────────┐     ┌─────────────┐
+│ 05/03/2025  │ ─▶ │ JJ/MM → ISO     │ ─▶  │ 2025-03-05  │
+│ 1 234,56    │ ─▶ │ Virgule → Point │ ─▶  │ 1234.56     │
+│ 9:30        │ ─▶ │ Durée padding   │ ─▶  │ 09:30:00    │
+└─────────────┘    └─────────────────┘     └─────────────┘
+
+Vue comparative avec indicateurs visuels
+```
+
+---
+
+## Fichiers concernés
+
+### À créer
+
+| Fichier | Description |
+|---------|-------------|
+| `components/import/wizard/step-transform-preview.tsx` | Composant principal de preview |
+| `lib/domain/transformation/preview.ts` | Logique de génération des previews |
+| `docs/specs-preview-verification.md` | Spécification complète |
+
+### À modifier
+
+| Fichier | Modification |
+|---------|--------------|
+| `components/import/import-wizard.tsx` | Ajouter étape 6 (preview), décaler confirm à 7 |
+| `components/import/wizard/wizard-progress.tsx` | Passer de 7 à 8 étapes |
+
+### À consulter (référence)
+
+| Fichier | Raison |
+|---------|--------|
+| `lib/domain/transformation/transformers.ts` | Logique de transformation existante |
+| `lib/domain/detection/type-detector.ts` | Détection des types |
+| `types/validation.ts` | Types de transformations |
+
+---
+
+## Spécification fonctionnelle
+
+### Vue comparative par colonne
+
+Pour chaque colonne avec transformation, afficher un échantillon (5-10 lignes) :
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  Prévisualisation des transformations                                       │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  Colonne: "Date début" (type Zoho: DATE)                                   │
+│  Transformation: JJ/MM/AAAA → AAAA-MM-JJ (ISO 8601)                        │
+│                                                                             │
+│  #  │ Fichier source   │ Sera envoyé       │ Statut                        │
+│  ───┼──────────────────┼───────────────────┼────────────────────────────── │
+│  1  │ 05/03/2025       │ 2025-03-05        │ 🔄 Transformé                 │
+│  2  │ 06/03/2025       │ 2025-03-06        │ 🔄 Transformé                 │
+│  3  │ N/A              │ (vide)            │ ⚠️ Valeur vide normalisée     │
+│  4  │ 07/03/2025       │ 2025-03-07        │ 🔄 Transformé                 │
+│  5  │ 08/03/2025       │ 2025-03-08        │ 🔄 Transformé                 │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Types de transformations et indicateurs
+
+| Type | Source | → Envoyé | Indicateur |
+|------|--------|----------|------------|
+| Date FR→ISO | 05/03/2025 | 2025-03-05 | 🔄 Transformé |
+| Nombre FR→US | 1 234,56 | 1234.56 | 🔄 Transformé |
+| Durée padding | 9:30 | 09:30:00 | 🔄 Transformé |
+| Scientifique | 1E6 | 1000000 | 🔄 Développé |
+| Trim espaces | "  texte  " | "texte" | 🔄 Nettoyé |
+| Vide normalisé | "N/A" | "" | ⚠️ Vide |
+| Aucune | "ABC123" | "ABC123" | ✅ Inchangé |
+
+### Résumé global
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  Résumé des transformations                                                 │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  📊 14 lignes × 22 colonnes = 308 valeurs                                  │
+│                                                                             │
+│  🔄 Colonnes transformées (4) :                                             │
+│     • Date début    : JJ/MM/AAAA → ISO (14 valeurs)                        │
+│     • Date fin      : JJ/MM/AAAA → ISO (14 valeurs)                        │
+│     • Heure début   : H:mm → HH:mm:ss (14 valeurs)                         │
+│     • Montant       : virgule → point (14 valeurs)                         │
+│                                                                             │
+│  ✅ Colonnes inchangées (18) :                                              │
+│     Journal, Numéro Quittance, Réseau, Ligne, Arrêt, ...                   │
+│                                                                             │
+│  ⚠️ Points d'attention :                                                    │
+│     • 2 valeurs vides normalisées (N/A → vide)                             │
+│                                                                             │
+│  Total : 56 transformations sur 308 valeurs (18%)                          │
+│                                                                             │
+│                      [◀ Retour]  [Confirmer et continuer ▶]                │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Spécification technique
+
+### Interface TransformPreview
+
+```typescript
+// types/transformation.ts
+
+interface TransformPreviewColumn {
+  columnName: string;
+  zohoType: string;
+  transformationType: TransformationType | null;
+  transformationLabel: string;
+  samples: TransformPreviewSample[];
+}
+
+interface TransformPreviewSample {
+  rowIndex: number;
+  sourceValue: string;
+  transformedValue: string;
+  status: 'transformed' | 'unchanged' | 'empty' | 'error';
+}
+
+interface TransformPreviewSummary {
+  totalRows: number;
+  totalColumns: number;
+  totalValues: number;
+  transformedColumns: {
+    name: string;
+    type: string;
+    count: number;
+  }[];
+  unchangedColumns: string[];
+  warnings: {
+    type: string;
+    count: number;
+    message: string;
+  }[];
+  totalTransformations: number;
+  transformationPercentage: number;
+}
+
+interface TransformPreviewResult {
+  columns: TransformPreviewColumn[];
+  summary: TransformPreviewSummary;
+}
+```
+
+### Fonction generateTransformPreview
+
+```typescript
+// lib/domain/transformation/preview.ts
+
+export function generateTransformPreview(
+  data: Record<string, unknown>[],
+  columnMappings: ColumnMapping[],
+  resolvedIssues: IssueResolution[],
+  sampleSize: number = 5
+): TransformPreviewResult {
+  // 1. Pour chaque colonne avec transformation
+  // 2. Extraire N échantillons
+  // 3. Appliquer transformation
+  // 4. Comparer source vs transformé
+  // 5. Générer résumé
+}
+```
+
+### Props du composant
+
+```typescript
+// components/import/wizard/step-transform-preview.tsx
+
+interface StepTransformPreviewProps {
+  data: Record<string, unknown>[];
+  columnMappings: ColumnMapping[];
+  resolvedIssues: IssueResolution[];
+  zohoColumns: ZohoColumn[];
+  onBack: () => void;
+  onConfirm: () => void;
+}
+```
+
+---
+
+## Actions planifiées
+
+### Phase 1 : Spécification (30 min)
+
+- [ ] Créer `docs/specs-preview-verification.md`
+- [ ] Valider avec utilisateur
+
+### Phase 2 : Logique métier (1h30)
+
+- [ ] Créer types dans `types/transformation.ts`
+- [ ] Implémenter `lib/domain/transformation/preview.ts`
+- [ ] Tests unitaires basiques
+
+### Phase 3 : Composant UI (2h)
+
+- [ ] Créer `step-transform-preview.tsx`
+- [ ] Vue détaillée par colonne (accordéon)
+- [ ] Résumé global
+- [ ] Indicateurs visuels (🔄, ✅, ⚠️)
+
+### Phase 4 : Intégration wizard (30 min)
+
+- [ ] Modifier `import-wizard.tsx` (ajouter étape)
+- [ ] Modifier `wizard-progress.tsx` (8 étapes)
+- [ ] Tester flux complet
+
+---
+
+## Critères de succès
+
+### Fonctionnel
+
+- [ ] L'utilisateur voit chaque transformation avant import
+- [ ] Vue comparative source / transformé claire
+- [ ] Résumé avec statistiques (colonnes, valeurs, %)
+- [ ] Navigation retour possible pour modifier
+
+### Technique
+
+- [ ] Build sans erreur TypeScript
+- [ ] Performance OK avec 10 000+ lignes (sampling)
+- [ ] Composant réutilisable
+
+### Tests manuels
+
+- [ ] Import QUITTANCES avec transformations dates + nombres
+- [ ] Import sans transformation (tout vert)
+- [ ] Import avec valeurs vides
+
+---
+
+## Wizard mis à jour (8 étapes)
+
+```
+1. Sélection fichier     Upload CSV/Excel
+        ↓
+2. Profil import         Matching profil ou création
+        ↓
+3. Configuration         Workspace/table + mode import
+        ↓
+4. Validation            Validation schéma colonnes
+        ↓
+5. Résolution            Formats ambigus (si nécessaire)
+        ↓
+6. Preview               ← NOUVELLE ÉTAPE
+        ↓
+7. Vérification          Récapitulatif final
+        ↓
+8. Import                Envoi + confirmation
+```
+
+---
+
+## Risques et points d'attention
+
+| Risque | Probabilité | Mitigation |
+|--------|-------------|------------|
+| Performance avec gros fichiers | Moyenne | Sampling (5-10 lignes par colonne) |
+| UI trop complexe | Faible | Accordéon replié par défaut, résumé visible |
+| Redondance avec étape Résolution | Moyenne | Résolution = décider du format, Preview = voir le résultat |
+
+---
+
+## Estimation
+
+| Phase | Effort |
+|-------|--------|
+| Spécification | 30 min |
+| Logique métier | 1h30 |
+| Composant UI | 2h |
+| Intégration wizard | 30 min |
+| Tests | 30 min |
+| **Total** | **5h** |
+
+---
+
+## Notes de session
+
+### Décisions prises
+
+* [À compléter pendant la session]
+
+### Problèmes rencontrés
+
+* [À compléter pendant la session]
+
+### Questions en suspens
+
+* [À compléter pendant la session]
+
+---
+
+# 📋 BILAN DE SESSION
+
+*À compléter en fin de session*
+
+## ✅ Travail accompli
+
+* [ ] Item 1
+
+## 📁 Fichiers modifiés
+
+| Fichier | Action | Description |
+|---------|--------|-------------|
+| - | - | - |
+
+## 📊 Métriques
+
+| Métrique | Valeur |
+|----------|--------|
+| Fichiers créés | - |
+| Fichiers modifiés | - |
+| Lignes de code ajoutées | - |
+| Durée de session | - |
+
+## ⏳ Reste à faire
+
+* [ ] -
+
+---
+
+*Mission créée le : 2025-12-04*
+*Dernière mise à jour : 2025-12-04*
+*Statut : 🆕 Nouvelle*

@@ -7,6 +7,7 @@ export type ImportStatus =
   | 'profiling'     // ← AJOUTER
   | 'configuring'
   | 'validating'
+  | 'previewing'
   | 'reviewing'
   | 'importing'
   | 'success'

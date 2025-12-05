@@ -16,18 +16,18 @@ const WIZARD_STEPS: WizardStep[] = [
   { id: 'configuring', label: 'Configuration', shortLabel: 'Config' },
   { id: 'validating', label: 'Validation', shortLabel: 'Validation' },
   { id: 'resolving', label: 'Résolution', shortLabel: 'Résolution' },
+  { id: 'previewing', label: 'Aperçu', shortLabel: 'Aperçu' },
   { id: 'reviewing', label: 'Vérification', shortLabel: 'Revue' },
   { id: 'success', label: 'Terminé', shortLabel: 'Fin' },
 ];
 
 interface WizardProgressProps {
   currentStatus: ImportStatus;
-  isResolving?: boolean;  // Nouvelle prop
+  isResolving?: boolean;
   className?: string;
 }
 
 export function WizardProgress({ currentStatus, isResolving = false, className = '' }: WizardProgressProps) {
-  // Déterminer l'étape effective
   const getEffectiveStatus = (): ImportStatus | 'resolving' => {
     if (currentStatus === 'reviewing' && isResolving) {
       return 'resolving';

@@ -1,5 +1,5 @@
 // lib/hooks/use-import.ts
-// VERSION MODIFIÉE - Avec étape Profil
+// VERSION MODIFIÉE - Avec étape Profil et Preview
 'use client';
 
 import { useReducer, useCallback, useMemo } from 'react';
@@ -113,7 +113,7 @@ function importReducer(state: ImportState, action: ImportAction): ImportState {
     case 'VALIDATION_SUCCESS':
       return {
         ...state,
-        status: 'reviewing',
+        status: 'previewing',  // ← MODIFIÉ : passe à previewing au lieu de reviewing
         validation: action.payload,
         progress: null,
         error: null,
@@ -164,21 +164,19 @@ function importReducer(state: ImportState, action: ImportAction): ImportState {
       };
 
     case 'GO_TO_STEP':
-      // Empêcher de sauter des étapes vers l'avant sans les données requises
       const targetStatus = action.payload;
-      
+
       // Vérifications de transition
-      // MODIFIÉ : profiling nécessite un fichier
       if (targetStatus === 'profiling' && !state.config.file) {
-        return state; // Bloquer si pas de fichier
+        return state;
       }
       if (targetStatus === 'configuring' && !state.config.file) {
-        return state; // Bloquer si pas de fichier
+        return state;
       }
       if (targetStatus === 'validating' && !state.config.tableId) {
-        return state; // Bloquer si pas de table
+        return state;
       }
-      
+
       return {
         ...state,
         status: targetStatus,
@@ -196,18 +194,11 @@ function importReducer(state: ImportState, action: ImportAction): ImportState {
 // ==================== HOOK ====================
 
 export interface UseImportReturn {
-  // État
   state: ImportState;
-
-  // Actions fichier
   setFile: (file: File) => void;
   removeFile: () => void;
-
-  // Actions config
   setTable: (tableId: string, tableName: string) => void;
   setImportMode: (mode: ImportMode) => void;
-
-  // Actions validation/import
   startValidation: () => void;
   setValidationResult: (result: ValidationResult) => void;
   setValidationError: (error: string) => void;
@@ -215,14 +206,10 @@ export interface UseImportReturn {
   updateProgress: (progress: ImportProgress) => void;
   setImportSuccess: (result: ImportResult) => void;
   setImportError: (error: string) => void;
-
-  // Navigation
   goToStep: (status: ImportStatus) => void;
   goNext: () => void;
   goBack: () => void;
   reset: () => void;
-
-  // Computed
   currentStepIndex: number;
   canGoNext: boolean;
   canGoBack: boolean;
@@ -232,13 +219,14 @@ export interface UseImportReturn {
 }
 
 // ============================================================================
-// MODIFIÉ : Ordre des étapes avec 'profiling'
+// MODIFIÉ : Ordre des étapes avec 'profiling' et 'previewing'
 // ============================================================================
 const STEP_ORDER: ImportStatus[] = [
   'selecting',
-  'profiling',     // ← NOUVEAU
+  'profiling',
   'configuring',
   'validating',
+  'previewing',  // ← NOUVEAU
   'reviewing',
   'success',
 ];
@@ -310,17 +298,18 @@ export function useImport(): UseImportReturn {
   }, [state.status]);
 
   // ============================================================================
-  // MODIFIÉ : canGoNext avec étape profiling
+  // MODIFIÉ : canGoNext avec étape previewing
   // ============================================================================
   const canGoNext = useMemo(() => {
     switch (state.status) {
       case 'selecting':
         return !!state.config.file;
       case 'profiling':
-        // L'étape profil gère sa propre navigation
         return true;
       case 'configuring':
         return !!state.config.tableId;
+      case 'previewing':  // ← NOUVEAU
+        return true;
       case 'reviewing':
         return state.validation?.isValid ?? false;
       default:
@@ -329,21 +318,21 @@ export function useImport(): UseImportReturn {
   }, [state.status, state.config.file, state.config.tableId, state.validation]);
 
   // ============================================================================
-  // MODIFIÉ : canGoBack avec étape profiling
+  // MODIFIÉ : canGoBack avec étape previewing
   // ============================================================================
   const canGoBack = useMemo(() => {
-    return ['profiling', 'configuring', 'reviewing', 'error'].includes(state.status);
+    return ['profiling', 'configuring', 'previewing', 'reviewing', 'error'].includes(state.status);
   }, [state.status]);
 
   // ============================================================================
-  // MODIFIÉ : goNext avec étape profiling
+  // MODIFIÉ : goNext avec étape previewing
   // ============================================================================
   const goNext = useCallback(() => {
     if (!canGoNext) return;
 
     switch (state.status) {
       case 'selecting':
-          goToStep('profiling');
+        goToStep('profiling');
         break;
       case 'profiling':
         goToStep('configuring');
@@ -351,28 +340,33 @@ export function useImport(): UseImportReturn {
       case 'configuring':
         goToStep('validating');
         break;
+      case 'previewing':  // ← NOUVEAU
+        goToStep('reviewing');
+        break;
       case 'reviewing':
-        // L'import sera déclenché par le composant
         break;
     }
   }, [state.status, canGoNext, goToStep]);
 
   // ============================================================================
-  // MODIFIÉ : goBack avec étape profiling
+  // MODIFIÉ : goBack avec étape previewing
   // ============================================================================
   const goBack = useCallback(() => {
     if (!canGoBack) return;
 
     switch (state.status) {
       case 'profiling':
-        goToStep('selecting');  // ← NOUVEAU
+        goToStep('selecting');
         break;
       case 'configuring':
-        goToStep('configuring');  // ← MODIFIÉ : retour vers profiling
+        goToStep('profiling');
+        break;
+      case 'previewing':  // ← NOUVEAU
+        goToStep('configuring');
         break;
       case 'reviewing':
       case 'error':
-        goToStep('configuring');
+        goToStep('previewing');  // ← MODIFIÉ : retour vers previewing
         break;
     }
   }, [state.status, canGoBack, goToStep]);

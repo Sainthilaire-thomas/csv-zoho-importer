@@ -1,7 +1,7 @@
 
 # CSV to Zoho Analytics Importer - Contexte de Base
 
-*Mis à jour le 2025-12-04 (Session 3 Mission 005 - Sauvegarde profils + specs v2.1)*
+*Mis à jour le 2025-12-04 (Mission 006 Phase 1 terminée)*
 
 ---
 
@@ -22,7 +22,7 @@ Application web permettant d'automatiser l'import de fichiers CSV/Excel dans Zoh
 3. **Explicite plutôt qu'implicite** : Aucune conversion silencieuse. L'utilisateur voit et valide chaque transformation.
 4. **Échec rapide** : Bloquer AVANT l'import si doute sur l'intégrité des données.
 5. **Accumulation intelligente** : Le profil apprend les alias et formats au fil du temps.
-6. **Un profil = une configuration complète** : Mode d'import et clé de matching non modifiables à la volée.
+6. **Un profil = une table** : Relation 1:1 stricte (un profil par table Zoho).
 
 ### Stack technique
 
@@ -123,7 +123,7 @@ Fichiers Excel          PROFIL                    Table Zoho
 │                     FRONTEND (Next.js App Router)                               │
 │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐                 │
 │  │  Import Wizard  │  │    Settings     │  │    History      │                 │
-│  │  (7 étapes)     │  │    (Profils)    │  │    (Logs)       │                 │
+│  │  (8 étapes)     │  │    (Profils)    │  │    (Logs)       │                 │
 │  └────────┬────────┘  └────────┬────────┘  └────────┬────────┘                 │
 │           └────────────────────┼────────────────────┘                           │
 │                                ▼                                                │
@@ -152,7 +152,7 @@ Fichiers Excel          PROFIL                    Table Zoho
 
 ---
 
-## Wizard d'import (7 étapes)
+## Wizard d'import (8 étapes) ← MODIFIÉ Mission 006
 
 ```
 1. Sélection fichier     Upload CSV/Excel (jusqu'à 200 MB)
@@ -165,9 +165,11 @@ Fichiers Excel          PROFIL                    Table Zoho
         ↓
 5. Résolution            Confirmation formats ambigus (dates, notation scientifique)
         ↓
-6. Vérification          Récapitulatif avant import
+6. Aperçu                ← NOUVELLE ÉTAPE (Mission 006)
+        ↓                Preview des transformations source → Zoho
+7. Vérification          Récapitulatif avant import
         ↓
-7. Import                Envoi à Zoho Analytics + confirmation + sauvegarde profil
+8. Import                Envoi à Zoho Analytics + confirmation + sauvegarde profil
 ```
 
 ### Types de transformations
@@ -195,102 +197,113 @@ Fichiers Excel          PROFIL                    Table Zoho
 
 ### Approche : OAuth2 flow complet ✅ FONCTIONNEL
 
-Chaque utilisateur connecte son propre compte Zoho via l'interface. Les tokens sont stockés chiffrés (AES-256-GCM) dans Supabase.
+```
+1. Utilisateur clique "Connecter Zoho"
+2. Redirection vers Zoho (authorization)
+3. Retour avec code d'autorisation
+4. Échange code → tokens (access + refresh)
+5. Stockage chiffré (AES-256-GCM) dans Supabase
+6. Refresh automatique si access_token expiré
+```
 
-### Points techniques importants
+### Endpoints API utilisés
 
-1. **Domaine API** : Toujours utiliser `analyticsapi.zoho.com` (pas `zohoapis.com`)
-2. **Variables serveur** : `APP_URL` nécessaire en plus de `NEXT_PUBLIC_APP_URL`
-3. **Cookies OAuth** : 2 cookies séparés (`zoho_oauth_state` et `zoho_oauth_region`)
-4. **UUID** : Utiliser `crypto.randomUUID()` (pas le package `uuid`)
+| Endpoint                              | Usage                        |
+| ------------------------------------- | ---------------------------- |
+| `/oauth/authorize`                  | Initier connexion            |
+| `/oauth/token`                      | Échanger code/refresh token |
+| `/restapi/v2/orgs`                  | Lister organisations         |
+| `/restapi/v2/workspaces`            | Lister workspaces            |
+| `/restapi/v2/workspaces/{id}/views` | Lister tables                |
+| `/restapi/v2/views/{id}?CONFIG=...` | Récupérer colonnes         |
+| `/restapi/v2/views/{id}/data`       | Import données              |
 
 ---
 
-## API Zoho Analytics v2
+## Structure de fichiers principale
 
-### Endpoints principaux
-
-| Action              | Endpoint                                             | Méthode |
-| ------------------- | ---------------------------------------------------- | -------- |
-| Liste workspaces    | `/workspaces`                                      | GET      |
-| Liste tables        | `/workspaces/{id}/views`                           | GET      |
-| Détails + colonnes | `/views/{id}?CONFIG={"withInvolvedMetaInfo":true}` | GET      |
-| Liste dossiers      | `/workspaces/{id}/folders`                         | GET      |
-| Import données     | `/workspaces/{id}/views/{id}/data?CONFIG={...}`    | POST     |
-| Lire données       | `/views/{id}/data?CONFIG={...}`                    | GET      |
-| Supprimer données  | `/views/{id}/data`                                 | DELETE   |
-
-### Format import
-
-```typescript
-// CONFIG en query string
-const config = {
-  importType: 'append',      // append|truncateadd|updateadd|deleteupsert|onlyadd
-  fileType: 'csv',
-  autoIdentify: false,       // FALSE pour contrôle explicite
-  dateFormat: 'yyyy-MM-dd'
-};
-
-// FormData avec fichier
-const formData = new FormData();
-formData.append('FILE', csvBlob, 'import.csv');  // 'FILE' pas 'ZOHO_FILE'
-
-// Headers
-{
-  'Authorization': 'Zoho-oauthtoken {access_token}',
-  'ZANALYTICS-ORGID': '{orgId}'
-}
+```
+csv-zoho-importer/
+├── app/
+│   ├── (auth)/                    # Pages auth (login, etc.)
+│   ├── (dashboard)/               # Pages protégées
+│   │   ├── import/                # Page import principale
+│   │   ├── parametres/            # Page paramètres (profils)
+│   │   └── historique/            # Page historique
+│   └── api/
+│       ├── zoho/                  # Routes API Zoho
+│       │   ├── oauth/             # OAuth flow
+│       │   ├── workspaces/        # Liste workspaces
+│       │   ├── tables/            # Liste tables
+│       │   ├── columns/           # Colonnes d'une table
+│       │   └── import/            # Import données
+│       └── profiles/              # Routes API Profils
+│           ├── route.ts           # GET/POST profils
+│           ├── [id]/route.ts      # PUT/DELETE profil
+│           └── match/route.ts     # Matching profil
+├── components/
+│   ├── import/
+│   │   └── wizard/                # Composants wizard
+│   │       ├── step-source.tsx
+│   │       ├── step-profile.tsx
+│   │       ├── step-config.tsx
+│   │       ├── step-validate.tsx
+│   │       ├── step-resolve.tsx
+│   │       ├── step-transform-preview.tsx  ← NOUVEAU
+│   │       ├── step-review.tsx
+│   │       ├── step-confirm.tsx
+│   │       ├── wizard-progress.tsx
+│   │       └── import-wizard.tsx
+│   └── ui/                        # Composants UI réutilisables
+├── lib/
+│   ├── domain/
+│   │   ├── detection/             # Détection types
+│   │   ├── file-provider/         # Parsing fichiers
+│   │   ├── profile/               # Services profils
+│   │   ├── transformation/        # Transformation + preview  ← NOUVEAU
+│   │   └── validation/            # Validation schéma
+│   ├── hooks/                     # React hooks personnalisés
+│   └── infrastructure/
+│       └── zoho/                  # Client API Zoho
+└── types/                         # Types TypeScript
+    ├── index.ts
+    └── profiles.ts
 ```
 
 ---
 
 ## Types principaux
 
+### ImportProfile (Supabase)
+
 ```typescript
 interface ImportProfile {
   id: string;
   name: string;
-  workspaceId: string;
-  workspaceName: string;
-  viewId: string;
-  viewName: string;
-  columns: ProfileColumn[];
-  defaultImportMode: ImportMode;
-  matchingColumns?: string[];  // Clé pour modes UPDATE*
-  createdAt: Date;
-  lastUsedAt: Date;
-  useCount: number;
+  org_id: string;
+  workspace_id: string;
+  view_id: string;           // UNIQUE - 1 profil = 1 table
+  view_name: string;
+  import_mode: ImportMode;
+  matching_columns?: string[];  // Pour modes UPDATE*
+  column_configs: ColumnConfig[];
+  created_at: string;
+  updated_at: string;
+  last_used_at?: string;
+  import_count: number;
 }
+```
 
-interface ProfileColumn {
-  zohoColumn: string;
-  zohoType: ZohoDataType;
-  isRequired: boolean;
-  acceptedNames: string[];
-  dataType: 'date' | 'duration' | 'number' | 'text' | 'boolean';
-  config: ColumnConfig;
+### ColumnConfig
+
+```typescript
+interface ColumnConfig {
+  zohoColumnName: string;
+  type: 'string' | 'number' | 'date' | 'duration' | 'boolean';
+  aliases: string[];           // Noms acceptés dans les fichiers
+  dateFormats?: string[];      // Formats de date confirmés
+  transformations?: string[];  // Transformations validées
 }
-
-type ColumnConfig = 
-  | DateColumnConfig      // dayMonthOrder: 'dmy' | 'mdy'
-  | DurationColumnConfig  // acceptedFormats
-  | NumberColumnConfig    // expandScientific
-  | TextColumnConfig      // trim, emptyValues
-  | BooleanColumnConfig;  // trueValues, falseValues
-
-type ImportStatus = 
-  | 'idle' 
-  | 'selecting' 
-  | 'profiling'      // ✅ Ajouté
-  | 'configuring' 
-  | 'validating' 
-  | 'resolving' 
-  | 'reviewing' 
-  | 'importing' 
-  | 'success' 
-  | 'error';
-
-type ProfileMode = 'existing' | 'new' | 'skip';
 ```
 
 ---
@@ -324,67 +337,53 @@ APP_URL=http://localhost:3000
 
 ## État d'avancement
 
-### ✅ Complété (Missions 001-003)
+### ✅ Complété (Missions 001-005)
 
 * Setup projet Next.js 15 + Tailwind v4
 * Authentification Supabase + Dark mode
 * Base de données (schéma csv_importer)
-* Wizard d'import complet (7 étapes)
+* Wizard d'import complet (8 étapes avec preview)
 * Support CSV et Excel (.xlsx, .xls) jusqu'à 200 MB
 * Moteur de validation (4 règles : required, date, number, email)
 * OAuth2 Zoho complet fonctionnel
 * Stockage tokens chiffrés (AES-256-GCM)
 * Liste workspaces, tables, dossiers
-* Composant accordéon pour sélection tables
 * **Import réel vers Zoho Analytics** ✅
+* **Système de profils d'import complet** ✅
+  * Matching intelligent (score, Levenshtein)
+  * Pré-remplissage config depuis profil
+  * Skip résolution si formats connus
+  * Sauvegarde/mise à jour profil après import
+  * Édition et suppression de profil
+  * Clé de matching pour modes UPDATE*
+  * Architecture 1 profil = 1 table
+
+### 🟡 En cours (Mission 006 - Preview Transformations)
+
+**Phase 1 terminée** : Étape "Aperçu" dans le wizard
+
+* ✅ Composant StepTransformPreview créé
+* ✅ Tableau avec données réelles source → transformé
+* ✅ Toggle colonnes transformées / toutes
+* ✅ Navigation 8 étapes fonctionnelle
+
+**Phase 2 à faire** : Vérification post-import
+
+* 🔜 API GET données depuis Zoho après import
+* 🔜 Comparaison envoyé vs stocké
+* 🔜 Rapport d'anomalies
 
 ### ⏸️ En pause (Mission 004)
 
 * ✅ Types validation schéma créés
 * ✅ Service SchemaValidator implémenté
-* ✅ Route API /zoho/columns fonctionnelle
-* ✅ Intégration validation schéma dans wizard
-* ✅ Affichage correspondances colonnes (✅, ⚠️, ❌)
-* ⏸️ Reste : interface résolution, transformations, vérification post-import
+* ⏸️ Reste : interface résolution, vérification post-import
 
-**Raison pause** : L'approche "Profils d'Import" (Mission 005) est prioritaire.
-
-### 🔄 En cours (Mission 005 - Profils d'Import)
-
-**Phase 1 - Infrastructure** ✅
-
-* ✅ Table Supabase `import_profiles`
-* ✅ Types TypeScript pour profils (`types/profiles.ts`)
-* ✅ API CRUD `/api/profiles/*`
-
-**Phase 2 - Services métier** ✅
-
-* ✅ Service TypeDetector (`lib/domain/detection/`)
-* ✅ Service ProfileManager (`lib/domain/profile/`)
-
-**Phase 3 - Interface** ✅ (90%)
-
-* ✅ Étape wizard step-profile.tsx
-* ✅ Wizard 7 étapes avec profiling
-* ✅ Parsing automatique avant profil
-* ✅ Transformations automatiques (detectAutoTransformations)
-* ✅ Résolution issues (dates ambiguës)
-* ✅ Import complet validé (14 lignes QUITTANCES)
-* ✅ **Sauvegarde profil après import** (saveOrUpdateProfile)
-* ✅ **Pré-remplissage config depuis profil**
-* ✅ **Skip résolution si format connu dans profil**
-* ❌ Fix : passer profile à validateSchema
-
-**Phase 4 - Intégration complète** ⏳
-
-* ❌ Fix validateSchema (ajouter `profile: selectedProfile`)
-* ❌ Migration BDD (matching_columns)
-* ❌ Sélecteur clé de matching dans StepConfig
-* ❌ Validation mode + clé avant import
-* ❌ Composant ProfileDetails (aperçu profil)
+**Raison pause** : Intégré dans Mission 005/006.
 
 ### 📋 Futures missions
 
+* [ ] Mission 007 : Vérification post-import (comparaison avec données Zoho réelles)
 * [ ] Éditeur de règles de validation avancé
 * [ ] Connexion SFTP
 * [ ] Page Historique des imports enrichie
@@ -425,13 +424,14 @@ CB, TVA, TTC, Motif, Exonération, Vu BCA, ACO, Véhicule
 
 ## Documents de référence
 
-| Document                             | Description                                           |
-| ------------------------------------ | ----------------------------------------------------- |
-| `docs/specs-profils-import.md`     | **RÉFÉRENCE MISSION 005**- v2.1 (16 sections) |
-| `docs/specs-fonctionnelles.md`     | Specs originales                                      |
-| `docs/specs-validation-avancee.md` | Validation (remplacé par profils)                    |
-| `docs/architecture-cible-v3.md`    | Architecture technique                                |
-| `mission-005-profils-import.md`    | Mission en cours                                      |
+| Document                                   | Description                                |
+| ------------------------------------------ | ------------------------------------------ |
+| `docs/specs-profils-import-v2.1.md`      | Specs profils (v2.1 - 16 sections)         |
+| `docs/specs-preview-verification.md`     | Specs preview et vérification post-import |
+| `docs/specs-fonctionnelles.md`           | Specs originales                           |
+| `docs/architecture-cible-v3.md`          | Architecture technique                     |
+| `mission-005-profils-import.md`          | Mission terminée ✅                       |
+| `mission-006-preview-transformations.md` | Mission en cours 🟡                        |
 
 ---
 
@@ -470,23 +470,26 @@ fetch('/api/profiles').then(r => r.json()).then(console.log)
 
 7. **Endpoint colonnes** : `/views/{id}?CONFIG={"withInvolvedMetaInfo":true}` (pas `/columns`)
 
-### Mission 005 (Session 2)
+### Mission 005 (Sessions 1-4)
 
 8. **Écran vide étape 2** : Case 'profiling' manquante dans renderStep()
 9. **Property 'id' does not exist** : ZohoTable utilise viewId/viewName, pas id/name
 10. **parsedData null à l'étape profil** : Ajout parsing automatique dans case 'profiling'
 11. **resolvedIssues non transmises** : Ajout prop resolvedIssues à StepReview
 12. **Accolades orphelines schema-validator** : Restauration Git après suppression logs
-
-### Mission 005 (Session 3)
-
 13. **Body stream already read** : `response.json()` appelé 2 fois sur erreur 409
 14. **IssueResolution type error** : Union type, accéder via `resolution?.type === 'date_format'`
 15. **ColumnConfig type error** : Cast explicite après vérification `config.type === 'date'`
 16. **Alert variant invalid** : `variant="default"` n'existe pas, utiliser `variant="info"`
+17. **matchingColumns absent** : Ajouter matchingColumns dans body de handleImport
+
+### Mission 006
+
+18. **Suspense boundary** : useSearchParams() doit être wrappé dans `<Suspense>` pour build Next.js
+19. **Button variant** : `variant="default"` n'existe pas, utiliser `variant="primary"`
 
 ---
 
 *Ce document doit être mis à jour lorsque les types fondamentaux ou l'architecture changent.*
 
-*Dernière mise à jour : 2025-12-04*
+*Dernière mise à jour : 2025-12-04 (soir)*
