@@ -11,6 +11,8 @@ import { StepReview } from './step-review';
 import { StepResolve } from './step-resolve';
 import { StepConfirm } from './step-confirm';
 import { StepTransformPreview } from './step-transform-preview';
+import { verifyImport, type SentRow, type VerificationResult, EMPTY_VERIFICATION_RESULT } from '@/lib/domain/verification';
+
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { useImport } from '@/lib/hooks/use-import';
@@ -91,7 +93,7 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
   const [selectedMatchResult, setSelectedMatchResult] = useState<ProfileMatchResult | null>(null);
   const [detectedColumns, setDetectedColumns] = useState<DetectedColumn[]>([]);
  const [matchingColumns, setMatchingColumns] = useState<string[]>([]);
-
+const [verificationSample, setVerificationSample] = useState<SentRow[]>([]);
   // Charger les workspaces au montage
   useEffect(() => {
     async function fetchWorkspaces() {
@@ -445,84 +447,140 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
     }
   }, [profileMode, selectedProfile, selectedMatchResult, resolvedIssues, detectedColumns, selectedWorkspaceId, workspaces, state.config, matchingColumns]);
 
-  const handleImport = useCallback(async () => {
-    if (!parsedData || !state.config.tableId || !state.validation) return;
+ const handleImport = useCallback(async () => {
+  if (!parsedData || !state.config.tableId || !state.validation) return;
 
-    startImport();
+  startImport();
 
-    try {
-      const validData = parsedData.filter((_, index) => {
-        const lineNumber = index + 2;
-        return !state.validation!.errors.some((err) => err.line === lineNumber);
-      });
+  try {
+    const validData = parsedData.filter((_, index) => {
+      const lineNumber = index + 2;
+      return !state.validation!.errors.some((err) => err.line === lineNumber);
+    });
 
-      const csvData = Papa.unparse(validData);
+    // ==================== NOUVEAU : Sauvegarder échantillon pour vérification ====================
+    const sampleSize = 5;
+    const sampleRows: SentRow[] = validData.slice(0, sampleSize).map((row, index) => ({
+      index: index + 2, // +2 car ligne 1 = headers, index 0 = ligne 2
+      data: Object.fromEntries(
+        Object.entries(row).map(([k, v]) => [k, String(v ?? '')])
+      ) as Record<string, string>,
+    }));
+    setVerificationSample(sampleRows);
+    // ==================== FIN NOUVEAU ====================
 
-      updateProgress({
-        phase: 'importing',
-        current: 0,
-        total: validData.length,
-        percentage: 0,
-      });
+    const csvData = Papa.unparse(validData);
 
-      const response = await fetch('/api/zoho/import', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-           body: JSON.stringify({
-          workspaceId: selectedWorkspaceId,
-          tableId: state.config.tableId,
-          tableName: state.config.tableName,
-          importMode: state.config.importMode,
-          csvData: csvData,
-          fileName: state.config.file?.name,
-          totalRows: validData.length,
-          matchingColumns: matchingColumns.length > 0 ? matchingColumns : undefined,
-        }),
-      });
+    updateProgress({
+      phase: 'importing',
+      current: 0,
+      total: validData.length,
+      percentage: 0,
+    });
 
-      const result = await response.json();
+    const response = await fetch('/api/zoho/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        workspaceId: selectedWorkspaceId,
+        tableId: state.config.tableId,
+        tableName: state.config.tableName,
+        importMode: state.config.importMode,
+        csvData: csvData,
+        fileName: state.config.file?.name,
+        totalRows: validData.length,
+        matchingColumns: matchingColumns.length > 0 ? matchingColumns : undefined,
+      }),
+    });
 
-      if (!response.ok) {
-        throw new Error(result.error || "Erreur lors de l'import");
-      }
+    const result = await response.json();
 
-      // ==========================================================================
-      // Sauvegarder/mettre a jour le profil apres import reussi
-      // ==========================================================================
-      if (profileMode !== 'skip') {
-        try {
-          await saveOrUpdateProfile();
-        } catch (profileError) {
-          console.error('Erreur sauvegarde profil (non bloquant):', profileError);
-        }
-      }
-
-      setImportSuccess({
-        success: true,
-        importId: result.importId || `imp_${Date.now()}`,
-        rowsImported: result.summary?.totalRowCount || validData.length,
-        duration: result.duration || 0,
-        zohoImportId: result.importId,
-      });
-
-      // Reset des etats
-      setParsedData(null);
-      setSchemaValidation(null);
-      setZohoSchema(null);
-      setResolvedIssues(null);
-      setIssuesResolved(false);
-      setSelectedProfile(null);
-      setSelectedMatchResult(null);
-      setDetectedColumns([]);
-      setProfileMode('skip');
-    } catch (error) {
-      console.error('Erreur import:', error);
-      setImportError(
-        error instanceof Error ? error.message : "Erreur lors de l'import"
-      );
+    if (!response.ok) {
+      throw new Error(result.error || "Erreur lors de l'import");
     }
-  }, [parsedData, state.config, state.validation, selectedWorkspaceId, profileMode, saveOrUpdateProfile, startImport, updateProgress, setImportSuccess, setImportError]);
 
+    // Sauvegarder/mettre à jour le profil après import réussi
+    if (profileMode !== 'skip') {
+      try {
+        await saveOrUpdateProfile();
+      } catch (profileError) {
+        console.error('Erreur sauvegarde profil (non bloquant):', profileError);
+      }
+    }
+
+    // ==================== NOUVEAU : Lancer la vérification post-import ====================
+    let verificationResult: VerificationResult = EMPTY_VERIFICATION_RESULT;
+    
+    if (sampleRows.length > 0) {
+      try {
+        updateProgress({
+          phase: 'validating', // Réutiliser pour afficher "Vérification..."
+          current: 90,
+          total: 100,
+          percentage: 90,
+        });
+
+        verificationResult = await verifyImport(sampleRows, {
+          mode: state.config.importMode,
+          matchingColumn: matchingColumns.length > 0 ? matchingColumns[0] : undefined,
+          sampleSize: sampleRows.length,
+          workspaceId: selectedWorkspaceId,
+          viewId: state.config.tableId,
+          delayBeforeRead: 2000,
+        });
+
+        console.log('[Verification] Result:', verificationResult);
+      } catch (verifyError) {
+        console.error('Erreur vérification (non bloquant):', verifyError);
+        // La vérification a échoué mais l'import est réussi
+        verificationResult = {
+          ...EMPTY_VERIFICATION_RESULT,
+          performed: true,
+          errorMessage: verifyError instanceof Error ? verifyError.message : 'Erreur de vérification',
+        };
+      }
+    }
+    // ==================== FIN NOUVEAU ====================
+
+    setImportSuccess({
+      success: true,
+      importId: result.importId || `imp_${Date.now()}`,
+      rowsImported: result.summary?.totalRowCount || validData.length,
+      duration: result.duration || 0,
+      zohoImportId: result.importId,
+      verification: verificationResult, // ← NOUVEAU
+    });
+
+    // Reset des états
+    setParsedData(null);
+    setSchemaValidation(null);
+    setZohoSchema(null);
+    setResolvedIssues(null);
+    setIssuesResolved(false);
+    setSelectedProfile(null);
+    setSelectedMatchResult(null);
+    setDetectedColumns([]);
+    setProfileMode('skip');
+    setVerificationSample([]); // ← NOUVEAU
+  } catch (error) {
+    console.error('Erreur import:', error);
+    setImportError(
+      error instanceof Error ? error.message : "Erreur lors de l'import"
+    );
+  }
+}, [
+  parsedData, 
+  state.config, 
+  state.validation, 
+  selectedWorkspaceId, 
+  profileMode, 
+  saveOrUpdateProfile, 
+  startImport, 
+  updateProgress, 
+  setImportSuccess, 
+  setImportError,
+  matchingColumns, // ← AJOUTER à la liste des dépendances
+]);
   // ==========================================================================
   // Handlers pour StepProfile
   // ==========================================================================

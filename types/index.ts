@@ -2,6 +2,8 @@
 
 // ==================== IMPORT ====================
 
+import type { VerificationResult } from '@/lib/domain/verification';
+
 export type ImportStatus =
   | 'selecting'
   | 'profiling'     // ← AJOUTER
@@ -48,6 +50,7 @@ export interface ImportResult {
   rowsImported: number;
   duration: number;
   zohoImportId?: string;
+  verification?: VerificationResult;  // ← AJOUTER
 }
 
 // ==================== VALIDATION ====================

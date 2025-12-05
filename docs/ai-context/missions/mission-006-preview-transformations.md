@@ -2,8 +2,8 @@
 # 🎯 Mission 006: Preview des Transformations
 
 *Créée le 2025-12-04*
-*Dernière mise à jour : 2025-12-04 (soir)*
-*Statut : 🟡 En cours - Phase 1 terminée*
+*Dernière mise à jour : 2025-12-05*
+*Statut : 🟡 En cours - Phase 2 en développement*
 
 ---
 
@@ -12,7 +12,7 @@
 Donner à l'utilisateur une compréhension totale des transformations de données :
 
 1. **Avant import** : Preview des transformations (source → format Zoho) ✅ FAIT
-2. **Après import** : Vérification des données réellement stockées dans Zoho 🔜 À FAIRE
+2. **Après import** : Vérification des données réellement stockées dans Zoho 🔄 EN COURS
 
 ---
 
@@ -57,22 +57,22 @@ Donner à l'utilisateur une compréhension totale des transformations de donnée
 * ✅ Note explicative pour l'utilisateur
 * ✅ Navigation Retour/Confirmer fonctionnelle
 
-### Capture d'écran fonctionnelle :
-
-L'interface affiche :
-
-* 4 stats en haut : lignes à importer, colonnes mappées, avec transformation, sans modification
-* 2 boutons toggle : "Transformées (N)" et "Toutes les colonnes (N)"
-* Sélecteur : 3/5/10 lignes
-* Tableau avec données réelles et indicateurs visuels
-
 ---
 
-## 🔜 Phase 2 : Vérification Post-Import - À FAIRE
+## 🔄 Phase 2 : Vérification Post-Import - EN COURS
 
 ### Objectif
 
 Après l'import, récupérer les données depuis Zoho via API GET et les comparer à ce qu'on a envoyé.
+
+### Décisions prises
+
+| Question                                | Décision                                                    |
+| --------------------------------------- | ------------------------------------------------------------ |
+| **Stratégie d'identification**   | Option A : Échantillonnage (5 premières lignes)            |
+| **Support UPDATE**                | Oui, via la colonne de matching (obligatoire pour updateadd) |
+| **Timing**                        | Attendre 2 secondes après import avant lecture              |
+| **Nombre de lignes à vérifier** | 5 lignes par défaut (configurable)                          |
 
 ### Les 3 états de la donnée :
 
@@ -86,52 +86,169 @@ Après l'import, récupérer les données depuis Zoho via API GET et les compare
 └─────────────────────┘     └─────────────────────┘     └─────────────────────┘
 ```
 
-### Permet de détecter si Zoho a :
+### Flow de vérification
 
-* Réinterprété une date (jour/mois inversés : 05/03 → 03/05)
-* Tronqué un texte trop long
-* Arrondi un nombre (décimales perdues)
-* Changé l'encodage (accents perdus : é → ?)
-* Ignoré une colonne
+```
+1. AVANT IMPORT : Garder les 5 premières lignes en mémoire (sentRows)
+   ↓
+2. IMPORT : Envoyer à Zoho normalement
+   ↓
+3. ATTENDRE : 2 secondes (indexation Zoho)
+   ↓
+4. LIRE : GET /api/zoho/data avec critères
+   │
+   ├─ Mode APPEND : Chercher par valeurs multiples OU dernières lignes
+   └─ Mode UPDATE : Critère sur matchingColumn (obligatoire)
+   ↓
+5. COMPARER : envoyé vs lu (colonne par colonne)
+   ↓
+6. AFFICHER : Rapport dans StepConfirm (intégré à l'écran de succès)
+```
 
 ### Fichiers à créer :
 
-| Fichier                                                   | Description                             | Estimation |
-| --------------------------------------------------------- | --------------------------------------- | ---------- |
-| `app/api/zoho/data/route.ts`                            | API GET données depuis Zoho            | 1h         |
-| `lib/domain/verification/compare.ts`                    | Logique de comparaison envoyé vs reçu | 1h         |
-| `components/import/wizard/step-result-verification.tsx` | Composant rapport anomalies             | 2h         |
+| Fichier                                | Description                             | Estimation |
+| -------------------------------------- | --------------------------------------- | ---------- |
+| `lib/infrastructure/zoho/client.ts`  | Ajouter méthode `exportData()`       | 30min      |
+| `app/api/zoho/data/route.ts`         | API GET données depuis Zoho            | 45min      |
+| `lib/domain/verification/types.ts`   | Types pour la vérification             | 15min      |
+| `lib/domain/verification/compare.ts` | Logique de comparaison envoyé vs reçu | 45min      |
+| `lib/domain/verification/index.ts`   | Export du module                        | 5min       |
 
-### API Zoho nécessaire :
+### Fichiers à modifier :
 
-```typescript
-// GET https://analyticsapi.zoho.eu/restapi/v2/workspaces/{workspaceId}/views/{viewId}/data
-// Avec critères pour filtrer sur les lignes importées
+| Fichier                                        | Modification                                   | Estimation |
+| ---------------------------------------------- | ---------------------------------------------- | ---------- |
+| `types/index.ts`                             | Enrichir `ImportResult`avec `verification` | 10min      |
+| `components/import/wizard/import-wizard.tsx` | Garder échantillon + appeler vérification    | 30min      |
+| `components/import/wizard/step-confirm.tsx`  | Afficher rapport de vérification              | 1h         |
 
-async function fetchImportedRows(
-  workspaceId: string,
-  viewId: string,
-  matchingColumn: string,
-  matchingValues: string[]
-): Promise<Record<string, unknown>[]>
+### API Zoho utilisée
+
+```
+GET /restapi/v2/workspaces/{workspaceId}/views/{viewId}/data?CONFIG={...}
+
+CONFIG = {
+  "responseFormat": "json",
+  "criteria": "\"N° PV\" IN ('12345','12346','12347')"  // Pour UPDATE
+}
+
+Headers:
+  - Authorization: Zoho-oauthtoken {token}
+  - ZANALYTICS-ORGID: {orgId}
 ```
 
 ### Types d'anomalies détectables :
 
-| Niveau      | Type               | Exemple                             |
-| ----------- | ------------------ | ----------------------------------- |
-| 🔴 Critique | Valeur différente | Date 05/03 → 03/05 (inversée)     |
-| 🔴 Critique | Colonne vide       | Source avait valeur, Zoho vide      |
-| 🟡 Warning  | Troncature         | Texte coupé après 255 caractères |
-| 🟡 Warning  | Arrondi            | 1234.567 → 1234.57                 |
-| 🟡 Warning  | Encodage           | "Café" → "Caf?"                   |
+| Niveau      | Type               | Exemple                             | Détection                    |
+| ----------- | ------------------ | ----------------------------------- | ----------------------------- |
+| 🔴 Critique | Valeur différente | Date 05/03 → 03/05 (inversée)     | `sent !== received`         |
+| 🔴 Critique | Colonne vide       | Source avait valeur, Zoho vide      | `sent && !received`         |
+| 🔴 Critique | Ligne manquante    | Ligne non trouvée dans Zoho        | Count mismatch                |
+| 🟡 Warning  | Troncature         | Texte coupé après 255 caractères | `received.startsWith(sent)` |
+| 🟡 Warning  | Arrondi            | 1234.567 → 1234.57                 | Différence < 0.01            |
+| 🟡 Warning  | Encodage           | "Café" → "Caf?"                   | Unicode check                 |
 
-### Questions ouvertes :
+### Structure des types
 
-1. **Performance** : Limiter vérification aux N premières lignes ?
-2. **Clé matching** : Comment identifier lignes importées sans clé unique ?
-3. **Timing** : Attendre combien de temps après import ? (indexation Zoho ~2s)
-4. **Rollback** : Proposer suppression automatique si anomalies critiques ?
+```typescript
+// lib/domain/verification/types.ts
+
+export interface VerificationConfig {
+  mode: 'append' | 'updateadd';
+  matchingColumn?: string;        // Obligatoire pour updateadd
+  sampleSize: number;             // 5 par défaut
+  workspaceId: string;
+  viewId: string;
+}
+
+export interface SentRow {
+  index: number;                  // Index dans le fichier original
+  data: Record<string, string>;   // Données envoyées
+}
+
+export type AnomalyLevel = 'critical' | 'warning';
+export type AnomalyType = 
+  | 'value_different' 
+  | 'value_missing' 
+  | 'row_missing'
+  | 'truncated'
+  | 'rounded'
+  | 'encoding';
+
+export interface Anomaly {
+  level: AnomalyLevel;
+  type: AnomalyType;
+  rowIndex: number;
+  column: string;
+  sentValue: string;
+  receivedValue: string;
+  message: string;
+}
+
+export interface VerificationResult {
+  success: boolean;
+  checkedRows: number;
+  matchedRows: number;
+  anomalies: Anomaly[];
+  duration: number;
+  summary: {
+    critical: number;
+    warning: number;
+  };
+}
+
+// Extension de ImportResult
+export interface ImportResultWithVerification extends ImportResult {
+  verification?: VerificationResult;
+}
+```
+
+### UI du rapport de vérification
+
+Intégré dans `StepConfirm`, après les stats d'import :
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        ✅ Import réussi !                           │
+│                                                                     │
+│  ┌─────────────────┐  ┌─────────────────┐                          │
+│  │     1,247       │  │      2.3s       │                          │
+│  │ lignes importées│  │  durée totale   │                          │
+│  └─────────────────┘  └─────────────────┘                          │
+│                                                                     │
+│  ─────────────────────────────────────────────────────────────────  │
+│                                                                     │
+│  📋 VÉRIFICATION POST-IMPORT                                        │
+│  ─────────────────────────────────────────────────────────────────  │
+│                                                                     │
+│  ✅ 5 lignes vérifiées sur 5                                       │
+│  ✅ 0 anomalie détectée                                            │
+│  ✅ Intégrité des données confirmée                                │
+│                                                                     │
+│  [Nouvel import]  [Ouvrir Zoho Analytics]                          │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+Ou en cas d'anomalies :
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│  ⚠️ VÉRIFICATION POST-IMPORT                                        │
+│  ─────────────────────────────────────────────────────────────────  │
+│                                                                     │
+│  ⚠️ 5 lignes vérifiées, 2 anomalies détectées                      │
+│                                                                     │
+│  🔴 Ligne 3, colonne "Date début"                                  │
+│     Envoyé: 2025-03-05 → Reçu: 2025-05-03                          │
+│     ⚠️ Date potentiellement inversée (jour/mois)                   │
+│                                                                     │
+│  🟡 Ligne 7, colonne "Observation"                                 │
+│     Texte tronqué après 255 caractères                             │
+│                                                                     │
+│  [Voir détails]  [Nouvel import]  [Ouvrir Zoho]                    │
+└─────────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
@@ -146,45 +263,41 @@ async function fetchImportedRows(
 
 ---
 
-## 📋 Prochaine Session (05/12/2025)
+## 📋 Session 05/12/2025 - Phase 2
 
-### Priorité 1 : Git et documentation
+### Ordre d'implémentation
 
-* [ ] Commit Git de la Phase 1
-* [ ] Vérifier que tout fonctionne en dev
+1. ⬜ Ajouter méthode `exportData()` dans `client.ts`
+2. ⬜ Créer `app/api/zoho/data/route.ts`
+3. ⬜ Créer `lib/domain/verification/types.ts`
+4. ⬜ Créer `lib/domain/verification/compare.ts`
+5. ⬜ Créer `lib/domain/verification/index.ts`
+6. ⬜ Modifier `types/index.ts` (ImportResult)
+7. ⬜ Modifier `import-wizard.tsx` (garder échantillon)
+8. ⬜ Modifier `step-confirm.tsx` (afficher rapport)
+9. ⬜ Tests manuels
+10. ⬜ Commit Git
 
-### Priorité 2 : Phase 2 - Vérification Post-Import
-
-* [ ] Rechercher documentation API Zoho GET data
-* [ ] Créer `app/api/zoho/data/route.ts`
-* [ ] Implémenter la logique de comparaison
-* [ ] Créer le composant de rapport de vérification
-* [ ] Intégrer après l'écran de succès
-
-### Optionnel : Améliorations Phase 1
-
-* [ ] Utiliser les vraies transformations du schéma (pas simulation)
-* [ ] Améliorer le responsive mobile
-* [ ] Ajouter export du preview en CSV
+### Estimation totale : ~4h
 
 ---
 
-## Commit Git suggéré
+## Commit Git suggéré (Phase 2)
 
 ```bash
 git add .
-git commit -m "feat(mission-006): étape preview transformations dans wizard
+git commit -m "feat(mission-006): vérification post-import
 
-- Ajout status 'previewing' dans types/index.ts
-- Navigation 8 étapes dans use-import.ts
-- Composant StepTransformPreview avec tableau données réelles
-- Toggle colonnes transformées/toutes + sélecteur nb lignes
-- Indicateurs visuels source → transformé
-- Fix Suspense boundary page import (bug Next.js)"
+- Ajout méthode exportData() dans client Zoho
+- API GET /api/zoho/data pour lecture données
+- Module verification/ avec compare.ts et types.ts
+- Rapport de vérification intégré dans StepConfirm
+- Détection anomalies: valeurs différentes, troncature, arrondi
+- Support modes APPEND et UPDATE (via matchingColumn)"
 ```
 
 ---
 
 *Mission créée le : 2025-12-04*
 *Phase 1 terminée le : 2025-12-04*
-*Prochaine session : 05/12/2025 - Phase 2 Vérification Post-Import*
+*Phase 2 démarrée le : 2025-12-05*

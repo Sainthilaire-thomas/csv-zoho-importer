@@ -689,6 +689,79 @@ export class ZohoAnalyticsClient {
       importErrors: allErrors.length > 0 ? allErrors : undefined,
     };
   }
+// ==================== EXPORT / READ DATA ====================
+
+  /**
+   * Lit des données depuis une table Zoho
+   * Utilisé pour la vérification post-import
+   */
+  async exportData(
+    workspaceId: string,
+    viewId: string,
+    options: {
+      criteria?: string;
+      selectedColumns?: string[];
+      limit?: number;
+    } = {}
+  ): Promise<{ data: Record<string, unknown>[]; rowCount: number }> {
+    const { criteria, selectedColumns, limit } = options;
+
+    // Construire le CONFIG
+    const config: Record<string, unknown> = {
+      responseFormat: 'json',
+    };
+
+    if (criteria) {
+      config.criteria = criteria;
+    }
+
+    if (selectedColumns && selectedColumns.length > 0) {
+      config.selectedColumns = selectedColumns;
+    }
+
+    // Encoder le CONFIG
+    const configEncoded = encodeURIComponent(JSON.stringify(config));
+
+    const url = `/workspaces/${workspaceId}/views/${viewId}/data?CONFIG=${configEncoded}`;
+
+    console.log('[Zoho Export] URL:', url);
+    console.log('[Zoho Export] Config:', JSON.stringify(config));
+
+    // La réponse Zoho a le format : { data: [...rows...] }
+    interface ExportResponse {
+      status?: string;
+      data: Record<string, unknown>[];  // ← C'est directement un tableau !
+    }
+
+    const response = await this.request<ExportResponse>(url);
+
+    // response.data EST le tableau de lignes directement
+    const rows = Array.isArray(response.data) ? response.data : [];
+    const totalRowCount = rows.length;
+
+    // Appliquer la limite côté client si nécessaire
+    const limitedRows = limit ? rows.slice(0, limit) : rows;
+
+    console.log('[Zoho Export] Rows fetched:', limitedRows.length, '/', totalRowCount);
+
+    return {
+      data: limitedRows,
+      rowCount: totalRowCount,
+    };
+  }
+
+  /**
+   * Construit un critère SQL pour filtrer sur une colonne
+   * Utilisé pour la vérification post-import (mode UPDATE)
+   *
+   * @param column - Nom de la colonne
+   * @param values - Valeurs à filtrer
+   * @returns Critère SQL formaté pour Zoho
+   */
+  static buildInCriteria(column: string, values: string[]): string {
+    const escapedValues = values.map(v => `'${v.replace(/'/g, "''")}'`);
+    return `"${column}" IN (${escapedValues.join(',')})`;
+  }
 
   // ==================== HELPERS ====================
 

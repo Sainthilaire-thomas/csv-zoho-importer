@@ -1,6 +1,6 @@
 ﻿# Structure du projet - csv-zoho-importer
 
-*Genere le 2025-12-04 12:12:10*
+*Genere le 2025-12-05 10:18:17*
 ```
 csv-zoho-importer/
 |-- .vscode/
@@ -64,9 +64,11 @@ csv-zoho-importer/
 |   |   |   |-- step-resolve.tsx
 |   |   |   |-- step-review.tsx
 |   |   |   |-- step-source.tsx
+|   |   |   |-- step-transform-preview.tsx
 |   |   |   |-- step-validate.tsx
 |   |   |   +-- wizard-progress.tsx
 |   |   |-- file-upload.tsx
+|   |   |-- profile-edit-dialog.tsx
 |   |   |-- table-selector.tsx
 |   |   |-- table-selector-accordion.tsx
 |   |   |-- transformation-preview.tsx
@@ -80,6 +82,7 @@ csv-zoho-importer/
 |   |   |-- alert.tsx
 |   |   |-- button.tsx
 |   |   |-- card.tsx
+|   |   |-- dialog.tsx
 |   |   +-- progress.tsx
 |   |-- zoho/
 |   |   |-- index.ts
@@ -90,12 +93,15 @@ csv-zoho-importer/
 |-- docs/
 |   |-- ai-context/
 |   |   |-- missions/
+|   |   |   |-- image/
+|   |   |   |   +-- mission-005-profils-import/
 |   |   |   |-- mission-001-setup-initial.md
 |   |   |   |-- mission-002-wizard-import.md
 |   |   |   |-- mission-003-api-zoho.md
 |   |   |   |-- mission-004-validation-schema.md
 |   |   |   |-- mission-004-validation-schema-PAUSE.md
 |   |   |   |-- mission-005-profils-import.md
+|   |   |   |-- mission-006-preview-transformations.md
 |   |   |   +-- TEMPLATE-MISSION.md
 |   |   |-- base-context.md
 |   |   +-- README.md
@@ -109,6 +115,7 @@ csv-zoho-importer/
 |   |-- doc-session.md
 |   |-- project-structure.md
 |   |-- specs-fonctionnelles.md
+|   |-- specs-preview-verification.md
 |   |-- specs-profils-import.md
 |   |-- specs-profils-import-v2.1.md
 |   +-- specs-validation-avancee.md
@@ -121,6 +128,9 @@ csv-zoho-importer/
 |   |   |-- profile/
 |   |   |   |-- index.ts
 |   |   |   +-- profile-manager.ts
+|   |   |-- transformation/
+|   |   |   |-- index.ts
+|   |   |   +-- preview.ts
 |   |   |-- validation/
 |   |   |   |-- rules/
 |   |   |   |   |-- base.ts
