@@ -51,6 +51,7 @@ export interface ImportProfile {
   // Paramètres par défaut
   defaultImportMode: ImportMode;
   matchingColumns?: string[];  
+  verificationColumn?: string;
   
   // Métadonnées
   createdAt: Date;
@@ -360,6 +361,7 @@ export interface ImportProfileRow {
   updated_at: string;
   last_used_at: string | null;
   use_count: number;
+  verification_column: string | null;
 }
 
 /**
@@ -377,6 +379,7 @@ export function rowToProfile(row: ImportProfileRow): ImportProfile {
     columns: row.columns,
     defaultImportMode: row.default_import_mode,
     matchingColumns: row.matching_columns ?? undefined,
+    verificationColumn: row.verification_column ?? undefined,  // ← AJOUTER
     createdAt: new Date(row.created_at),
     createdBy: row.created_by,
     updatedAt: new Date(row.updated_at),
@@ -401,6 +404,7 @@ export function profileToRow(
     columns: profile.columns,
     default_import_mode: profile.defaultImportMode,
     matching_columns: profile.matchingColumns ?? null,
+    verification_column: profile.verificationColumn ?? null,  // ← AJOUTER
     created_by: profile.createdBy,
   };
 }

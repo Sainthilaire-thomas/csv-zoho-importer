@@ -1,5 +1,5 @@
 // lib/hooks/use-import.ts
-// VERSION MODIFIÉE - Avec étape Profil et Preview
+// VERSION MODIFIÉE - Avec import en 2 phases et rollback
 'use client';
 
 import { useReducer, useCallback, useMemo } from 'react';
@@ -11,7 +11,9 @@ import type {
   ValidationResult,
   ImportProgress,
   ImportResult,
+  TestImportResult,
 } from '@/types';
+import type { VerificationResult } from '@/lib/domain/verification';
 
 // ==================== ACTIONS ====================
 
@@ -24,11 +26,20 @@ type ImportAction =
   | { type: 'VALIDATION_SUCCESS'; payload: ValidationResult }
   | { type: 'VALIDATION_ERROR'; payload: string }
   | { type: 'START_IMPORT' }
+  | { type: 'START_TEST_IMPORT' }
+  | { type: 'TEST_IMPORT_COMPLETE'; payload: TestImportResult }
+  | { type: 'START_FULL_IMPORT' }
   | { type: 'UPDATE_PROGRESS'; payload: ImportProgress }
   | { type: 'IMPORT_SUCCESS'; payload: ImportResult }
   | { type: 'IMPORT_ERROR'; payload: string }
   | { type: 'GO_TO_STEP'; payload: ImportStatus }
   | { type: 'RESET' };
+
+// ==================== STATE ÉTENDU ====================
+
+export interface ImportStateExtended extends ImportState {
+  testResult: TestImportResult | null;
+}
 
 // ==================== INITIAL STATE ====================
 
@@ -41,18 +52,19 @@ const initialConfig: ImportConfig = {
   importMode: 'append',
 };
 
-const initialState: ImportState = {
+const initialState: ImportStateExtended = {
   status: 'selecting',
   config: initialConfig,
   validation: null,
   progress: null,
   result: null,
   error: null,
+  testResult: null,
 };
 
 // ==================== REDUCER ====================
 
-function importReducer(state: ImportState, action: ImportAction): ImportState {
+function importReducer(state: ImportStateExtended, action: ImportAction): ImportStateExtended {
   switch (action.type) {
     case 'SET_FILE':
       return {
@@ -113,7 +125,7 @@ function importReducer(state: ImportState, action: ImportAction): ImportState {
     case 'VALIDATION_SUCCESS':
       return {
         ...state,
-        status: 'previewing',  // ← MODIFIÉ : passe à previewing au lieu de reviewing
+        status: 'previewing',
         validation: action.payload,
         progress: null,
         error: null,
@@ -126,6 +138,44 @@ function importReducer(state: ImportState, action: ImportAction): ImportState {
         error: action.payload,
         progress: null,
       };
+
+    // ==================== NOUVEAU : Test Import ====================
+    case 'START_TEST_IMPORT':
+      return {
+        ...state,
+        status: 'test-importing',
+        error: null,
+        testResult: null,
+        progress: {
+          phase: 'test-importing',
+          current: 0,
+          total: 100,
+          percentage: 0,
+        },
+      };
+
+    case 'TEST_IMPORT_COMPLETE':
+      return {
+        ...state,
+        status: 'test-result',
+        testResult: action.payload,
+        progress: null,
+        error: null,
+      };
+
+    case 'START_FULL_IMPORT':
+      return {
+        ...state,
+        status: 'full-importing',
+        error: null,
+        progress: {
+          phase: 'full-importing',
+          current: 0,
+          total: 100,
+          percentage: 0,
+        },
+      };
+    // ==================== FIN NOUVEAU ====================
 
     case 'START_IMPORT':
       return {
@@ -153,6 +203,7 @@ function importReducer(state: ImportState, action: ImportAction): ImportState {
         result: action.payload,
         progress: null,
         error: null,
+        testResult: null, // Reset
       };
 
     case 'IMPORT_ERROR':
@@ -177,6 +228,16 @@ function importReducer(state: ImportState, action: ImportAction): ImportState {
         return state;
       }
 
+      // Si on retourne à previewing après rollback, reset testResult
+      if (targetStatus === 'previewing' || targetStatus === 'reviewing') {
+        return {
+          ...state,
+          status: targetStatus,
+          error: null,
+          testResult: null,
+        };
+      }
+
       return {
         ...state,
         status: targetStatus,
@@ -194,7 +255,7 @@ function importReducer(state: ImportState, action: ImportAction): ImportState {
 // ==================== HOOK ====================
 
 export interface UseImportReturn {
-  state: ImportState;
+  state: ImportStateExtended;
   setFile: (file: File) => void;
   removeFile: () => void;
   setTable: (tableId: string, tableName: string) => void;
@@ -203,6 +264,9 @@ export interface UseImportReturn {
   setValidationResult: (result: ValidationResult) => void;
   setValidationError: (error: string) => void;
   startImport: () => void;
+  startTestImport: () => void;
+  setTestImportComplete: (result: TestImportResult) => void;
+  startFullImport: () => void;
   updateProgress: (progress: ImportProgress) => void;
   setImportSuccess: (result: ImportResult) => void;
   setImportError: (error: string) => void;
@@ -215,19 +279,21 @@ export interface UseImportReturn {
   canGoBack: boolean;
   isValidating: boolean;
   isImporting: boolean;
+  isTestImporting: boolean;
   hasErrors: boolean;
 }
 
-// ============================================================================
-// MODIFIÉ : Ordre des étapes avec 'profiling' et 'previewing'
-// ============================================================================
+// Ordre des étapes avec les nouvelles
 const STEP_ORDER: ImportStatus[] = [
   'selecting',
   'profiling',
   'configuring',
   'validating',
-  'previewing',  // ← NOUVEAU
+  'previewing',
   'reviewing',
+  'test-importing',
+  'test-result',
+  'full-importing',
   'success',
 ];
 
@@ -265,10 +331,24 @@ export function useImport(): UseImportReturn {
     dispatch({ type: 'VALIDATION_ERROR', payload: error });
   }, []);
 
-  // Actions import
+  // Actions import classique
   const startImport = useCallback(() => {
     dispatch({ type: 'START_IMPORT' });
   }, []);
+
+  // ==================== NOUVEAU : Actions 2 phases ====================
+  const startTestImport = useCallback(() => {
+    dispatch({ type: 'START_TEST_IMPORT' });
+  }, []);
+
+  const setTestImportComplete = useCallback((result: TestImportResult) => {
+    dispatch({ type: 'TEST_IMPORT_COMPLETE', payload: result });
+  }, []);
+
+  const startFullImport = useCallback(() => {
+    dispatch({ type: 'START_FULL_IMPORT' });
+  }, []);
+  // ==================== FIN NOUVEAU ====================
 
   const updateProgress = useCallback((progress: ImportProgress) => {
     dispatch({ type: 'UPDATE_PROGRESS', payload: progress });
@@ -297,9 +377,6 @@ export function useImport(): UseImportReturn {
     return index === -1 ? 0 : index;
   }, [state.status]);
 
-  // ============================================================================
-  // MODIFIÉ : canGoNext avec étape previewing
-  // ============================================================================
   const canGoNext = useMemo(() => {
     switch (state.status) {
       case 'selecting':
@@ -308,25 +385,21 @@ export function useImport(): UseImportReturn {
         return true;
       case 'configuring':
         return !!state.config.tableId;
-      case 'previewing':  // ← NOUVEAU
+      case 'previewing':
         return true;
       case 'reviewing':
         return state.validation?.isValid ?? false;
+      case 'test-result':
+        return state.testResult?.success ?? false;
       default:
         return false;
     }
-  }, [state.status, state.config.file, state.config.tableId, state.validation]);
+  }, [state.status, state.config.file, state.config.tableId, state.validation, state.testResult]);
 
-  // ============================================================================
-  // MODIFIÉ : canGoBack avec étape previewing
-  // ============================================================================
   const canGoBack = useMemo(() => {
-    return ['profiling', 'configuring', 'previewing', 'reviewing', 'error'].includes(state.status);
+    return ['profiling', 'configuring', 'previewing', 'reviewing', 'test-result', 'error'].includes(state.status);
   }, [state.status]);
 
-  // ============================================================================
-  // MODIFIÉ : goNext avec étape previewing
-  // ============================================================================
   const goNext = useCallback(() => {
     if (!canGoNext) return;
 
@@ -340,17 +413,18 @@ export function useImport(): UseImportReturn {
       case 'configuring':
         goToStep('validating');
         break;
-      case 'previewing':  // ← NOUVEAU
+      case 'previewing':
         goToStep('reviewing');
         break;
       case 'reviewing':
+        // Après reviewing, on lance le test import (géré par le wizard)
+        break;
+      case 'test-result':
+        // Après test-result OK, on lance full import (géré par le wizard)
         break;
     }
   }, [state.status, canGoNext, goToStep]);
 
-  // ============================================================================
-  // MODIFIÉ : goBack avec étape previewing
-  // ============================================================================
   const goBack = useCallback(() => {
     if (!canGoBack) return;
 
@@ -361,18 +435,23 @@ export function useImport(): UseImportReturn {
       case 'configuring':
         goToStep('profiling');
         break;
-      case 'previewing':  // ← NOUVEAU
+      case 'previewing':
         goToStep('configuring');
         break;
       case 'reviewing':
       case 'error':
-        goToStep('previewing');  // ← MODIFIÉ : retour vers previewing
+        goToStep('previewing');
+        break;
+      case 'test-result':
+        // Retour après rollback → reviewing pour modifier
+        goToStep('reviewing');
         break;
     }
   }, [state.status, canGoBack, goToStep]);
 
   const isValidating = state.status === 'validating';
-  const isImporting = state.status === 'importing';
+  const isImporting = state.status === 'importing' || state.status === 'full-importing';
+  const isTestImporting = state.status === 'test-importing';
   const hasErrors = (state.validation?.errorRows ?? 0) > 0;
 
   return {
@@ -385,6 +464,9 @@ export function useImport(): UseImportReturn {
     setValidationResult,
     setValidationError,
     startImport,
+    startTestImport,
+    setTestImportComplete,
+    startFullImport,
     updateProgress,
     setImportSuccess,
     setImportError,
@@ -397,6 +479,7 @@ export function useImport(): UseImportReturn {
     canGoBack,
     isValidating,
     isImporting,
+    isTestImporting,
     hasErrors,
   };
 }

@@ -1,6 +1,6 @@
 ﻿# Structure du projet - csv-zoho-importer
 
-*Genere le 2025-12-05 10:18:17*
+*Genere le 2025-12-05 17:05:50*
 ```
 csv-zoho-importer/
 |-- .vscode/
@@ -36,6 +36,8 @@ csv-zoho-importer/
 |   |   +-- zoho/
 |   |       |-- columns/
 |   |       |   +-- route.ts
+|   |       |-- data/
+|   |       |   +-- route.ts
 |   |       |-- folders/
 |   |       |   +-- route.ts
 |   |       |-- import/
@@ -66,6 +68,7 @@ csv-zoho-importer/
 |   |   |   |-- step-source.tsx
 |   |   |   |-- step-transform-preview.tsx
 |   |   |   |-- step-validate.tsx
+|   |   |   |-- verification-report.tsx
 |   |   |   +-- wizard-progress.tsx
 |   |   |-- file-upload.tsx
 |   |   |-- profile-edit-dialog.tsx
@@ -101,7 +104,9 @@ csv-zoho-importer/
 |   |   |   |-- mission-004-validation-schema.md
 |   |   |   |-- mission-004-validation-schema-PAUSE.md
 |   |   |   |-- mission-005-profils-import.md
+|   |   |   |-- mission-006-COMPLETE.md
 |   |   |   |-- mission-006-preview-transformations.md
+|   |   |   |-- mission-007-import-2-phases-rollback.md
 |   |   |   +-- TEMPLATE-MISSION.md
 |   |   |-- base-context.md
 |   |   +-- README.md
@@ -141,6 +146,10 @@ csv-zoho-importer/
 |   |   |   |   +-- required.ts
 |   |   |   |-- engine.ts
 |   |   |   +-- index.ts
+|   |   |-- verification/
+|   |   |   |-- compare.ts
+|   |   |   |-- index.ts
+|   |   |   +-- types.ts
 |   |   |-- data-transformer.ts
 |   |   +-- schema-validator.ts
 |   |-- hooks/

@@ -763,6 +763,84 @@ export class ZohoAnalyticsClient {
     return `"${column}" IN (${escapedValues.join(',')})`;
   }
 
+
+  // ==================== DELETE DATA ====================
+
+  /**
+   * Supprime des lignes dans une table Zoho
+   * Utilisé pour le rollback après un import test
+   * 
+   * @param workspaceId - ID du workspace
+   * @param viewId - ID de la table/vue
+   * @param criteria - Critère SQL de suppression (ex: "\"NuméroQuittance\" IN ('val1','val2')")
+   * @returns Nombre de lignes supprimées
+   */
+  async deleteData(
+    workspaceId: string,
+    viewId: string,
+    criteria: string
+  ): Promise<{ deletedRows: number }> {
+    // Construire le CONFIG
+    const config = {
+      criteria: criteria,
+    };
+
+    const configEncoded = encodeURIComponent(JSON.stringify(config));
+    const url = `/workspaces/${workspaceId}/views/${viewId}/data?CONFIG=${configEncoded}`;
+
+    console.log('[Zoho Delete] URL:', url);
+    console.log('[Zoho Delete] Criteria:', criteria);
+
+    // Construire les headers
+    const headers: Record<string, string> = {
+      'Authorization': `Zoho-oauthtoken ${this.tokens.accessToken}`,
+    };
+
+    if (this.tokens.orgId) {
+      headers['ZANALYTICS-ORGID'] = this.tokens.orgId;
+    }
+
+    const fullUrl = `${this.tokens.apiDomain}/restapi/v2${url}`;
+
+    const response = await fetch(fullUrl, {
+      method: 'DELETE',
+      headers,
+    });
+
+    const responseText = await response.text();
+    console.log('[Zoho Delete] Status:', response.status);
+
+    let responseData: any;
+    try {
+      responseData = JSON.parse(responseText);
+    } catch {
+      responseData = { message: responseText };
+    }
+
+    if (!response.ok) {
+      console.error('[Zoho Delete] Error:', JSON.stringify(responseData, null, 2));
+
+      if (response.status === 401) {
+        throw new ZohoAuthError('Token Zoho invalide ou expiré', 'invalid_grant', true);
+      }
+
+      throw new ZohoApiError(
+        responseData.data?.errorMessage || responseData.message || `Erreur API Zoho : ${response.status}`,
+        responseData.data?.errorCode || responseData.error_code || 'API_ERROR',
+        response.status
+      );
+    }
+
+    // La réponse Zoho pour DELETE contient le nombre de lignes supprimées
+    const deletedRows = responseData.data?.deletedRows || 
+                        responseData.data?.affectedRows || 
+                        responseData.data?.rowCount || 0;
+
+    console.log('[Zoho Delete] Rows deleted:', deletedRows);
+
+    return { deletedRows };
+  }
+  
   // ==================== HELPERS ====================
 
   /**

@@ -27,3 +27,4 @@ export {
 
 // Fonctions principales
 export { verifyImport, buildInCriteria } from './compare';
+export * from './matching-detection';

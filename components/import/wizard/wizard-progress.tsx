@@ -1,13 +1,15 @@
 // components/import/wizard/wizard-progress.tsx
 'use client';
 
-import { Check } from 'lucide-react';
+import { Check, Loader2 } from 'lucide-react';
 import type { ImportStatus } from '@/types';
 
 interface WizardStep {
-  id: ImportStatus | 'resolving';
+  id: ImportStatus | 'resolving' | 'testing';
   label: string;
   shortLabel: string;
+  // Statuts qui correspondent à cette étape visuelle
+  matchStatuses?: ImportStatus[];
 }
 
 const WIZARD_STEPS: WizardStep[] = [
@@ -17,7 +19,19 @@ const WIZARD_STEPS: WizardStep[] = [
   { id: 'validating', label: 'Validation', shortLabel: 'Validation' },
   { id: 'resolving', label: 'Résolution', shortLabel: 'Résolution' },
   { id: 'previewing', label: 'Aperçu', shortLabel: 'Aperçu' },
-  { id: 'reviewing', label: 'Vérification', shortLabel: 'Revue' },
+  { id: 'reviewing', label: 'Récapitulatif', shortLabel: 'Récap' },
+  { 
+    id: 'testing', 
+    label: 'Test import', 
+    shortLabel: 'Test',
+    matchStatuses: ['test-importing', 'test-result']
+  },
+  { 
+    id: 'importing', 
+    label: 'Import', 
+    shortLabel: 'Import',
+    matchStatuses: ['full-importing', 'importing']
+  },
   { id: 'success', label: 'Terminé', shortLabel: 'Fin' },
 ];
 
@@ -28,21 +42,32 @@ interface WizardProgressProps {
 }
 
 export function WizardProgress({ currentStatus, isResolving = false, className = '' }: WizardProgressProps) {
-  const getEffectiveStatus = (): ImportStatus | 'resolving' => {
+  // Trouver l'étape effective basée sur le statut actuel
+  const getEffectiveStepIndex = (): number => {
+    // Cas spécial : résolution
     if (currentStatus === 'reviewing' && isResolving) {
-      return 'resolving';
+      return WIZARD_STEPS.findIndex((step) => step.id === 'resolving');
     }
-    return currentStatus;
+
+    // Cas erreur : rester sur l'étape précédente
+    if (currentStatus === 'error') {
+      return WIZARD_STEPS.findIndex((step) => step.id === 'reviewing');
+    }
+
+    // Chercher par matchStatuses d'abord
+    const matchIndex = WIZARD_STEPS.findIndex(
+      (step) => step.matchStatuses?.includes(currentStatus)
+    );
+    if (matchIndex !== -1) return matchIndex;
+
+    // Sinon chercher par id direct
+    return WIZARD_STEPS.findIndex((step) => step.id === currentStatus);
   };
 
-  const effectiveStatus = getEffectiveStatus();
-  const currentIndex = WIZARD_STEPS.findIndex((step) => step.id === effectiveStatus);
+  const effectiveIndex = getEffectiveStepIndex();
   
-  const effectiveIndex = currentStatus === 'error' 
-    ? WIZARD_STEPS.findIndex((step) => step.id === 'reviewing')
-    : currentStatus === 'importing'
-    ? WIZARD_STEPS.findIndex((step) => step.id === 'reviewing')
-    : currentIndex;
+  // Déterminer si on est en cours de chargement
+  const isLoading = ['validating', 'test-importing', 'full-importing', 'importing'].includes(currentStatus);
 
   return (
     <div className={`w-full ${className}`}>
@@ -53,6 +78,7 @@ export function WizardProgress({ currentStatus, isResolving = false, className =
             {WIZARD_STEPS.map((step, index) => {
               const isCompleted = index < effectiveIndex;
               const isCurrent = index === effectiveIndex;
+              const isCurrentLoading = isCurrent && isLoading;
 
               return (
                 <li key={step.id} className="flex items-center flex-1">
@@ -82,6 +108,8 @@ export function WizardProgress({ currentStatus, isResolving = false, className =
                       >
                         {isCompleted ? (
                           <Check className="w-5 h-5 text-white" />
+                        ) : isCurrentLoading ? (
+                          <Loader2 className="w-5 h-5 text-white animate-spin" />
                         ) : (
                           <span
                             className={`
@@ -150,6 +178,7 @@ export function WizardProgress({ currentStatus, isResolving = false, className =
           </div>
           <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
             {WIZARD_STEPS[effectiveIndex]?.label ?? 'En cours...'}
+            {isLoading && '...'}
           </span>
         </div>
       </div>

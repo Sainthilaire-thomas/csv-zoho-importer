@@ -1,7 +1,7 @@
 ﻿// components/import/wizard/import-wizard.tsx
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useRef } from 'react';
 import { WizardProgress } from './wizard-progress';
 import { StepSource } from './step-source';
 import { StepProfile } from './step-profile';
@@ -12,6 +12,15 @@ import { StepResolve } from './step-resolve';
 import { StepConfirm } from './step-confirm';
 import { StepTransformPreview } from './step-transform-preview';
 import { verifyImport, type SentRow, type VerificationResult, EMPTY_VERIFICATION_RESULT } from '@/lib/domain/verification';
+import { StepTestImport } from './step-test-import';
+import { StepTestResult } from './step-test-result';
+import { MatchingColumnSelector } from './matching-column-selector';
+import { 
+  findBestMatchingColumnEnhanced, 
+  type MatchingColumnResult 
+} from '@/lib/domain/verification';
+import { executeRollback, type RollbackResult } from '@/lib/domain/rollback';
+import type { TestImportResult } from '@/types';
 
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -38,25 +47,29 @@ type ProfileMode = 'existing' | 'new' | 'skip';
 
 export function ImportWizard({ className = '' }: ImportWizardProps) {
   const {
-    state,
-    setFile,
-    removeFile,
-    setTable,
-    setImportMode,
-    startValidation,
-    setValidationResult,
-    setValidationError,
-    startImport,
-    updateProgress,
-    setImportSuccess,
-    setImportError,
-    goToStep,
-    goNext,
-    goBack,
-    reset,
-    canGoNext,
-    isImporting,
-  } = useImport();
+  state,
+  setFile,
+  removeFile,
+  setTable,
+  setImportMode,
+  startValidation,
+  setValidationResult,
+  setValidationError,
+  startImport,
+  startTestImport,        // ← NOUVEAU
+  setTestImportComplete,  // ← NOUVEAU
+  startFullImport,        // ← NOUVEAU
+  updateProgress,
+  setImportSuccess,
+  setImportError,
+  goToStep,
+  goNext,
+  goBack,
+  reset,
+  canGoNext,
+  isImporting,
+  isTestImporting,        // ← NOUVEAU
+} = useImport();
 
   const { parseFile } = useCsvParser();
   const { validate } = useValidation({
@@ -94,6 +107,17 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
   const [detectedColumns, setDetectedColumns] = useState<DetectedColumn[]>([]);
  const [matchingColumns, setMatchingColumns] = useState<string[]>([]);
 const [verificationSample, setVerificationSample] = useState<SentRow[]>([]);
+
+// ==========================================================================
+// État pour l'import en 2 phases
+// ==========================================================================
+const [testSampleSize, setTestSampleSize] = useState(5);
+const [verificationColumn, setVerificationColumn] = useState<string | null>(null);
+const [matchingColumnResult, setMatchingColumnResult] = useState<MatchingColumnResult | null>(null);
+const [testMatchingValues, setTestMatchingValues] = useState<string[]>([]);
+// Ref pour accès immédiat à l'échantillon (évite le délai du state React)
+const verificationSampleRef = useRef<SentRow[]>([]);
+
   // Charger les workspaces au montage
   useEffect(() => {
     async function fetchWorkspaces() {
@@ -467,6 +491,7 @@ const [verificationSample, setVerificationSample] = useState<SentRow[]>([]);
       ) as Record<string, string>,
     }));
     setVerificationSample(sampleRows);
+    
     // ==================== FIN NOUVEAU ====================
 
     const csvData = Papa.unparse(validData);
@@ -632,6 +657,314 @@ const [verificationSample, setVerificationSample] = useState<SentRow[]>([]);
     schemaValidation.resolvableIssues.length > 0 && 
     !issuesResolved;
 
+    // ==========================================================================
+// Handlers pour l'import en 2 phases
+// ==========================================================================
+
+/**
+ * Prépare et lance l'import test
+ */
+const handleStartTestImport = useCallback(async () => {
+  if (!parsedData || !state.config.tableId || !state.validation) return;
+
+  // Détecter la colonne de matching si pas encore fait
+  if (!verificationColumn && verificationSample.length > 0) {
+    const result = findBestMatchingColumnEnhanced(verificationSample, {
+      profile: selectedProfile || undefined,
+      zohoSchema: zohoSchema?.columns,
+    });
+    setMatchingColumnResult(result);
+    setVerificationColumn(result.column || null);
+  }
+
+  startTestImport();
+}, [parsedData, state.config.tableId, state.validation, verificationColumn, verificationSample, selectedProfile, zohoSchema, startTestImport]);
+
+/**
+ * Exécute l'import de l'échantillon test
+ */
+const executeTestImport = useCallback(async (): Promise<{ success: boolean; error?: string }> => {
+  if (!parsedData || !state.config.tableId) {
+    return { success: false, error: 'Données manquantes' };
+  }
+
+  try {
+    // Filtrer les données valides
+    const validData = parsedData.filter((_, index) => {
+      const lineNumber = index + 2;
+      return !state.validation!.errors.some((err) => err.line === lineNumber);
+    });
+
+    // Prendre l'échantillon
+    const sampleData = validData.slice(0, testSampleSize);
+    
+    // Sauvegarder les valeurs de matching pour le rollback
+    if (verificationColumn) {
+      const values = sampleData
+        .map(row => String((row as Record<string, unknown>)[verificationColumn] ?? '').trim())
+        .filter(v => v !== '');
+      setTestMatchingValues(values);
+    }
+
+    // Construire l'échantillon pour vérification
+    const sampleRows: SentRow[] = sampleData.map((row, index) => ({
+      index: index + 2,
+      data: Object.fromEntries(
+        Object.entries(row).map(([k, v]) => [k, String(v ?? '')])
+      ) as Record<string, string>,
+    }));
+    setVerificationSample(sampleRows);
+    verificationSampleRef.current = sampleRows; // Stockage immédiat
+
+    // Convertir en CSV
+    const csvData = Papa.unparse(sampleData);
+
+    // Envoyer à Zoho
+    const response = await fetch('/api/zoho/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        workspaceId: selectedWorkspaceId,
+        tableId: state.config.tableId,
+        tableName: state.config.tableName,
+        importMode: state.config.importMode,
+        csvData: csvData,
+        fileName: state.config.file?.name,
+        totalRows: sampleData.length,
+        matchingColumns: matchingColumns.length > 0 ? matchingColumns : undefined,
+      }),
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      return { success: false, error: result.error || "Erreur lors de l'import test" };
+    }
+
+    return { success: true };
+  } catch (error) {
+    return { 
+      success: false, 
+      error: error instanceof Error ? error.message : 'Erreur inconnue' 
+    };
+  }
+}, [parsedData, state.config, state.validation, testSampleSize, verificationColumn, selectedWorkspaceId, matchingColumns]);
+
+/**
+ * Exécute la vérification après import test
+ */
+const executeTestVerification = useCallback(async (): Promise<{ success: boolean; error?: string }> => {
+  // Utiliser la ref pour accès immédiat (le state peut ne pas être à jour)
+  const sampleToVerify = verificationSampleRef.current;
+  
+  if (sampleToVerify.length === 0) {
+    return { success: false, error: 'Pas d\'échantillon à vérifier' };
+  }
+
+  try {
+    const verificationResult = await verifyImport(sampleToVerify, {
+      mode: state.config.importMode,
+      matchingColumn: verificationColumn || undefined,
+      sampleSize: sampleToVerify.length,
+      workspaceId: selectedWorkspaceId,
+      viewId: state.config.tableId,
+      delayBeforeRead: 2000,
+    });
+
+    // Créer le résultat du test
+    const testResult: TestImportResult = {
+      success: verificationResult.success,
+      rowsImported: sampleToVerify.length,
+      matchingColumn: verificationColumn || '',
+      matchingValues: testMatchingValues,
+      verification: verificationResult,
+      duration: verificationResult.duration,
+    };
+
+    setTestImportComplete(testResult);
+
+    return { 
+      success: verificationResult.success,
+      error: verificationResult.success ? undefined : 'Anomalies détectées'
+    };
+  } catch (error) {
+    return { 
+      success: false, 
+      error: error instanceof Error ? error.message : 'Erreur de vérification' 
+    };
+  }
+}, [state.config, verificationColumn, selectedWorkspaceId, testMatchingValues, setTestImportComplete]);
+/**
+ * Gère le test import complet (appelé par StepTestImport)
+ */
+const handleTestComplete = useCallback((success: boolean) => {
+  // Le résultat est déjà set par executeTestVerification via setTestImportComplete
+  console.log('[Wizard] Test import complete, success:', success);
+}, []);
+
+/**
+ * Gère les erreurs du test import
+ */
+const handleTestError = useCallback((error: string) => {
+  setImportError(error);
+}, [setImportError]);
+
+/**
+ * Exécute le rollback
+ */
+const handleRollback = useCallback(async (): Promise<RollbackResult> => {
+  if (!verificationColumn || testMatchingValues.length === 0) {
+    return {
+      success: false,
+      deletedRows: 0,
+      duration: 0,
+      errorMessage: 'Pas de données à supprimer',
+      remainingValues: testMatchingValues,
+    };
+  }
+
+  const result = await executeRollback({
+    workspaceId: selectedWorkspaceId,
+    viewId: state.config.tableId,
+    matchingColumn: verificationColumn,
+    matchingValues: testMatchingValues,
+    reason: 'user_cancelled',
+  });
+
+  if (result.success) {
+    // Retour à l'étape de preview pour corriger
+    goToStep('previewing');
+    // Reset les états de test
+    setTestMatchingValues([]);
+    setVerificationSample([]);
+  }
+
+  return result;
+}, [verificationColumn, testMatchingValues, selectedWorkspaceId, state.config.tableId, goToStep]);
+
+/**
+ * Confirme l'import complet après test réussi
+ */
+const handleConfirmFullImport = useCallback(async () => {
+  if (!parsedData || !state.config.tableId || !state.validation) return;
+
+  startFullImport();
+
+  try {
+    // Filtrer les données valides
+    const validData = parsedData.filter((_, index) => {
+      const lineNumber = index + 2;
+      return !state.validation!.errors.some((err) => err.line === lineNumber);
+    });
+
+    // Prendre les données RESTANTES (après l'échantillon)
+    const remainingData = validData.slice(testSampleSize);
+    
+    if (remainingData.length === 0) {
+      // Toutes les données ont déjà été importées dans le test
+      setImportSuccess({
+        success: true,
+        importId: `imp_${Date.now()}`,
+        rowsImported: testSampleSize,
+        duration: 0,
+        verification: state.testResult?.verification,
+      });
+      return;
+    }
+
+    const csvData = Papa.unparse(remainingData);
+
+    updateProgress({
+      phase: 'full-importing',
+      current: 0,
+      total: remainingData.length,
+      percentage: 0,
+    });
+
+    const response = await fetch('/api/zoho/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        workspaceId: selectedWorkspaceId,
+        tableId: state.config.tableId,
+        tableName: state.config.tableName,
+        importMode: 'append', // Toujours append pour les données restantes
+        csvData: csvData,
+        fileName: state.config.file?.name,
+        totalRows: remainingData.length,
+        matchingColumns: matchingColumns.length > 0 ? matchingColumns : undefined,
+      }),
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(result.error || "Erreur lors de l'import");
+    }
+
+    // Sauvegarder/mettre à jour le profil
+    if (profileMode !== 'skip') {
+      try {
+        await saveOrUpdateProfile();
+      } catch (profileError) {
+        console.error('Erreur sauvegarde profil (non bloquant):', profileError);
+      }
+    }
+
+    setImportSuccess({
+      success: true,
+      importId: result.importId || `imp_${Date.now()}`,
+      rowsImported: testSampleSize + remainingData.length,
+      duration: result.duration || 0,
+      zohoImportId: result.importId,
+      verification: state.testResult?.verification,
+    });
+
+    // Reset
+    setParsedData(null);
+    setSchemaValidation(null);
+    setZohoSchema(null);
+    setResolvedIssues(null);
+    setIssuesResolved(false);
+    setSelectedProfile(null);
+    setSelectedMatchResult(null);
+    setDetectedColumns([]);
+    setProfileMode('skip');
+    setVerificationSample([]);
+    setTestMatchingValues([]);
+    setVerificationColumn(null);
+
+  } catch (error) {
+    console.error('Erreur import complet:', error);
+    setImportError(
+      error instanceof Error ? error.message : "Erreur lors de l'import"
+    );
+  }
+}, [
+  parsedData,
+  state.config,
+  state.validation,
+  state.testResult,
+  testSampleSize,
+  selectedWorkspaceId,
+  matchingColumns,
+  profileMode,
+  saveOrUpdateProfile,
+  startFullImport,
+  updateProgress,
+  setImportSuccess,
+  setImportError,
+]);
+
+/**
+ * Force l'import malgré les anomalies
+ */
+const handleForceImport = useCallback(() => {
+  // Lancer l'import complet même avec anomalies
+  handleConfirmFullImport();
+}, [handleConfirmFullImport]);
+
+
   const renderStep = () => {
     switch (state.status) {
       case 'selecting':
@@ -727,7 +1060,7 @@ const [verificationSample, setVerificationSample] = useState<SentRow[]>([]);
           />
         );
 
-      case 'reviewing':
+     case 'reviewing':
         if (hasUnresolvedIssues && schemaValidation?.resolvableIssues) {
           return (
             <StepResolve
@@ -737,14 +1070,14 @@ const [verificationSample, setVerificationSample] = useState<SentRow[]>([]);
             />
           );
         }
-        
+
         return state.validation ? (
           <StepReview
             validation={state.validation}
             schemaValidation={schemaValidation}
             tableName={state.config.tableName}
             importMode={state.config.importMode}
-            isImporting={isImporting}
+            isImporting={isImporting || isTestImporting}  // ← MODIFIÉ
             onBack={() => {
               if (resolvedIssues && schemaValidation?.resolvableIssues && schemaValidation.resolvableIssues.length > 0) {
                 setIssuesResolved(false);
@@ -752,10 +1085,58 @@ const [verificationSample, setVerificationSample] = useState<SentRow[]>([]);
                 goBack();
               }
             }}
-            onImport={handleImport}
+            onImport={handleStartTestImport}  // ← MODIFIÉ : lance le test au lieu de l'import direct
             resolvedIssues={resolvedIssues || []}
           />
         ) : null;
+
+        // ==================== NOUVEAU : Étapes 2 phases ====================
+      case 'test-importing':
+        return (
+          <StepTestImport
+            sampleSize={testSampleSize}
+            matchingColumn={verificationColumn}
+            matchingValues={testMatchingValues}
+            onComplete={handleTestComplete}
+            onError={handleTestError}
+            executeImport={executeTestImport}
+            executeVerification={executeTestVerification}
+          />
+        );
+
+      case 'test-result':
+        if (!state.testResult) return null;
+        
+        const totalValidRows = parsedData 
+          ? parsedData.filter((_, index) => {
+              const lineNumber = index + 2;
+              return !state.validation!.errors.some((err) => err.line === lineNumber);
+            }).length
+          : 0;
+        const remainingRows = totalValidRows - testSampleSize;
+
+        return (
+          <StepTestResult
+            verificationResult={state.testResult.verification}
+            sampleSize={testSampleSize}
+            remainingRows={remainingRows}
+            matchingColumn={verificationColumn || ''}
+            matchingValues={testMatchingValues}
+            onConfirmFullImport={handleConfirmFullImport}
+            onRollbackAndFix={handleRollback}
+            onForceImport={handleForceImport}
+          />
+        );
+
+      case 'full-importing':
+        return (
+          <StepValidate
+            progress={state.progress}
+            fileName={state.config.file?.name ?? ''}
+            onValidationStart={() => {}}
+          />
+        );
+      // ==================== FIN NOUVEAU ====================
 
       case 'importing':
         return (

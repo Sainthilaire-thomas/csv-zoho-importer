@@ -6,12 +6,15 @@ import type { VerificationResult } from '@/lib/domain/verification';
 
 export type ImportStatus =
   | 'selecting'
-  | 'profiling'     // ← AJOUTER
+  | 'profiling'
   | 'configuring'
   | 'validating'
   | 'previewing'
   | 'reviewing'
-  | 'importing'
+  | 'test-importing'    // ← NOUVEAU
+  | 'test-result'       // ← NOUVEAU
+  | 'full-importing'    // ← NOUVEAU
+  | 'importing'         // Garde pour compatibilité
   | 'success'
   | 'error';
 
@@ -38,7 +41,7 @@ export interface ImportState {
 }
 
 export interface ImportProgress {
-  phase: 'parsing' | 'validating' | 'importing';
+  phase: 'parsing' | 'validating' | 'importing' | 'test-importing' | 'verifying' | 'full-importing';
   current: number;
   total: number;
   percentage: number;
@@ -149,3 +152,53 @@ export type {
   ZohoAuthError,
 } from '@/lib/infrastructure/zoho/types';
 export * from './profiles';
+
+// ==================== ROLLBACK & TWO-PHASE IMPORT ====================
+
+/** Configuration de l'import en 2 phases */
+export interface TwoPhaseImportConfig {
+  testSampleSize: number;        // Défaut: 5
+  matchingColumn?: string;       // Auto-détecté ou manuel
+  skipVerification?: boolean;    // Passer outre la vérification
+}
+
+/** Résultat de l'import test */
+export interface TestImportResult {
+  success: boolean;
+  rowsImported: number;
+  matchingColumn: string;
+  matchingValues: string[];      // Pour le rollback
+  verification: VerificationResult;
+  duration: number;
+}
+
+/** Configuration du rollback */
+export interface RollbackConfig {
+  workspaceId: string;
+  viewId: string;
+  matchingColumn: string;
+  matchingValues: string[];
+  reason: RollbackReason;
+}
+
+export type RollbackReason = 'verification_failed' | 'user_cancelled' | 'error_recovery';
+
+/** Résultat du rollback */
+export interface RollbackResult {
+  success: boolean;
+  deletedRows: number;
+  duration: number;
+  errorMessage?: string;
+  /** Valeurs à supprimer manuellement si échec */
+  remainingValues?: string[];
+}
+
+/** Statistiques de matching pour sélection manuelle */
+export interface ColumnMatchingStats {
+  columnName: string;
+  uniquePercentage: number;
+  nonEmptyCount: number;
+  totalCount: number;
+  isRecommended: boolean;
+  source: 'schema' | 'pattern' | 'content';
+}

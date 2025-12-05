@@ -1,7 +1,7 @@
 
 # CSV to Zoho Analytics Importer - Contexte de Base
 
-*Mis à jour le 2025-12-05 (Mission 006 terminée, Mission 007 spécifiée)*
+*Mis à jour le 2025-12-05 (Mission 007 en cours - Phase 1 complète)*
 
 ---
 
@@ -123,7 +123,7 @@ Fichiers Excel          PROFIL                    Table Zoho
 │                     FRONTEND (Next.js App Router)                               │
 │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐                 │
 │  │  Import Wizard  │  │    Settings     │  │    History      │                 │
-│  │  (8 étapes)     │  │    (Profils)    │  │    (Logs)       │                 │
+│  │  (10 étapes)    │  │    (Profils)    │  │    (Logs)       │                 │
 │  └────────┬────────┘  └────────┬────────┘  └────────┬────────┘                 │
 │           └────────────────────┼────────────────────┘                           │
 │                                ▼                                                │
@@ -136,7 +136,7 @@ Fichiers Excel          PROFIL                    Table Zoho
 │                                ▼                                                │
 │                   API LAYER (Route Handlers)                                    │
 │   /zoho/oauth/*  /zoho/workspaces  /zoho/tables  /zoho/columns  /zoho/import   │
-│   /zoho/data     /profiles/*       /profiles/match   /profiles/[id]            │
+│   /zoho/data     /zoho/delete      /profiles/*   /profiles/match               │
 └─────────────────────────────────────────────────────────────────────────────────┘
                               │
               ┌───────────────┼───────────────┐
@@ -152,7 +152,7 @@ Fichiers Excel          PROFIL                    Table Zoho
 
 ---
 
-## Wizard d'import (8 étapes)
+## Wizard d'import (10 étapes - Mission 007)
 
 ```
 1. Sélection fichier     Upload CSV/Excel (jusqu'à 200 MB)
@@ -167,9 +167,13 @@ Fichiers Excel          PROFIL                    Table Zoho
         ↓
 6. Aperçu                Preview des transformations source → Zoho
         ↓
-7. Vérification          Récapitulatif avant import
+7. Récapitulatif         Résumé avant test
         ↓
-8. Import                Envoi à Zoho Analytics + vérification post-import
+8. Test import           Import 5 lignes → Vérification → Tableau comparatif   ← NOUVEAU
+        ↓
+9. Import                Si OK: import reste | Si KO: rollback + correction    ← NOUVEAU
+        ↓
+10. Terminé              Confirmation finale avec lien Zoho
 ```
 
 ### Types de transformations
@@ -189,54 +193,7 @@ Fichiers Excel          PROFIL                    Table Zoho
 | --------------- | ------------ | ------------------------------------------------------- |
 | Profil existant | `existing` | Pré-remplit config, skip résolution si formats connus |
 | Nouveau profil  | `new`      | Configuration complète, sauvegardé après import      |
-| Import ponctuel | `skip`     | Config manuelle, aucune sauvegarde                      |
-
----
-
-## Module de vérification post-import
-
-### Architecture (Mission 006)
-
-```
-lib/domain/verification/
-├── types.ts          # VerificationConfig, SentRow, VerificationResult,
-│                     # Anomaly, ComparedRow, ComparedColumn
-├── compare.ts        # verifyImport(), compareRowsDetailed(),
-│                     # findBestMatchingColumn(), normalizeValue()
-└── index.ts          # Exports publics
-```
-
-### Colonne de matching (auto-détection)
-
-Priorité de sélection :
-
-| Priorité | Source       | Description                                                    |
-| --------- | ------------ | -------------------------------------------------------------- |
-| 1         | Profil       | `profile.matchingColumn`si défini                           |
-| 2         | Schéma Zoho | Colonne `isUnique: true`ou `AUTO_NUMBER`                   |
-| 3         | Nom colonne  | Patterns :`/^id$/i`,`/num[eé]ro/i`,`/code/i`,`/ref/i` |
-| 4         | Contenu      | Première colonne 100% unique et non vide                      |
-
-### Types d'anomalies détectées
-
-| Type                | Niveau   | Description                          |
-| ------------------- | -------- | ------------------------------------ |
-| `row_missing`     | Critical | Ligne non trouvée dans Zoho         |
-| `value_different` | Critical | Valeur complètement différente     |
-| `value_missing`   | Critical | Valeur présente → vide             |
-| `date_inverted`   | Critical | Jour/mois inversés (05/03 → 03/05) |
-| `truncated`       | Warning  | Texte tronqué                       |
-| `rounded`         | Warning  | Nombre arrondi                       |
-| `encoding_issue`  | Warning  | Accents perdus                       |
-
-### Affichage UI (tableau 3 colonnes)
-
-```
-| Colonne | 📄 Fichier | 🔄 Normalisée | ☁️ Zoho | Statut |
-|---------|-----------|---------------|---------|--------|
-| CB      | 35.0      | 35            | 35      | ✅     |
-| Date    | 05/03/2025| 05/03/2025    | 2025-03-05 | ✅  |
-```
+| Sans profil     | `none`     | Config manuelle à chaque fois                          |
 
 ---
 
@@ -245,97 +202,191 @@ Priorité de sélection :
 ```
 csv-zoho-importer/
 ├── app/
-│   ├── (auth)/
-│   │   ├── login/page.tsx
-│   │   └── register/page.tsx
+│   ├── (authenticated)/
+│   │   ├── import/page.tsx
+│   │   ├── history/page.tsx
+│   │   └── settings/page.tsx
 │   ├── api/
 │   │   ├── zoho/
-│   │   │   ├── oauth/          # Callback, status, disconnect
-│   │   │   ├── workspaces/     # Liste workspaces
-│   │   │   ├── tables/         # Liste tables par workspace
-│   │   │   ├── columns/        # Colonnes d'une table
-│   │   │   ├── import/         # Import des données
-│   │   │   └── data/           # GET données (vérification)
-│   │   └── profiles/           # CRUD profils + match
-│   ├── import/page.tsx         # Wizard principal
-│   ├── history/page.tsx
-│   ├── settings/page.tsx
+│   │   │   ├── oauth/callback/route.ts
+│   │   │   ├── oauth/initiate/route.ts
+│   │   │   ├── oauth/status/route.ts
+│   │   │   ├── workspaces/route.ts
+│   │   │   ├── tables/route.ts
+│   │   │   ├── columns/route.ts
+│   │   │   ├── import/route.ts
+│   │   │   ├── data/route.ts
+│   │   │   └── delete/route.ts        ← NOUVEAU (Mission 007)
+│   │   └── profiles/
+│   │       ├── route.ts
+│   │       ├── match/route.ts
+│   │       └── [id]/route.ts
 │   └── layout.tsx
 ├── components/
-│   ├── import/wizard/
-│   │   ├── import-wizard.tsx   # Orchestrateur
-│   │   ├── step-upload.tsx
-│   │   ├── step-profile.tsx
-│   │   ├── step-schema.tsx
-│   │   ├── step-validation.tsx
-│   │   ├── step-transform-preview.tsx
-│   │   ├── step-review.tsx
-│   │   └── step-confirm.tsx    # + rapport vérification
-│   └── ui/                     # Composants réutilisables
+│   ├── ui/                     # Composants réutilisables
+│   │   ├── button.tsx
+│   │   ├── card.tsx
+│   │   ├── alert.tsx
+│   │   └── ...
+│   └── import/
+│       └── wizard/
+│           ├── import-wizard.tsx
+│           ├── wizard-progress.tsx
+│           ├── step-upload.tsx
+│           ├── step-profile.tsx
+│           ├── step-config.tsx
+│           ├── step-validate.tsx
+│           ├── step-resolve.tsx
+│           ├── step-preview.tsx
+│           ├── step-review.tsx
+│           ├── step-test-import.tsx       ← NOUVEAU (Mission 007)
+│           ├── step-test-result.tsx       ← NOUVEAU (Mission 007)
+│           ├── matching-column-selector.tsx ← NOUVEAU (Mission 007)
+│           └── step-confirm.tsx
 ├── lib/
 │   ├── domain/
-│   │   ├── validation/         # Moteur de validation
-│   │   ├── transform/          # Transformations données
-│   │   ├── profile/            # Gestion profils
-│   │   └── verification/       # Vérification post-import ← NOUVEAU
-│   └── infrastructure/
-│       ├── supabase/
-│       └── zoho/
-│           ├── client.ts       # Client API (import, export, etc.)
-│           └── types.ts
-├── types/
-│   └── index.ts                # Types partagés
-└── docs/                       # Documentation
+│   │   ├── validation/
+│   │   │   ├── schema-validator.ts
+│   │   │   └── rules/
+│   │   ├── verification/
+│   │   │   ├── compare.ts
+│   │   │   ├── matching-detection.ts  ← NOUVEAU (Mission 007)
+│   │   │   └── index.ts
+│   │   └── rollback/                  ← NOUVEAU (Mission 007)
+│   │       ├── types.ts
+│   │       ├── rollback-service.ts
+│   │       └── index.ts
+│   ├── infrastructure/
+│   │   ├── supabase/
+│   │   └── zoho/
+│   │       └── client.ts              # Ajout deleteData()
+│   ├── hooks/
+│   │   └── use-import.ts              # États étendus (test-importing, test-result)
+│   └── utils/
+└── types/
+    ├── index.ts                       # Types principaux étendus
+    └── profiles.ts                    # verificationColumn ajouté
 ```
 
 ---
 
-## Base de données (Supabase)
+## Types principaux
 
-### Tables
+```typescript
+// types/index.ts
+
+export type ImportMode = 'append' | 'truncateadd' | 'updateadd' | 'deleteupsert' | 'onlyadd';
+
+export interface ParsedFile {
+  filename: string;
+  headers: string[];
+  data: Record<string, string>[];
+  totalRows: number;
+  parseTime: number;
+  extension: string;
+}
+
+export interface ImportConfig {
+  workspaceId: string;
+  tableId: string;
+  tableName: string;
+  importMode: ImportMode;
+  matchingColumns: string[];
+  dateFormat: string;
+}
+
+export type ImportStatus = 
+  | 'idle' | 'uploading' | 'profiling' | 'configuring' 
+  | 'validating' | 'resolving' | 'previewing' | 'reviewing'
+  | 'test-importing' | 'test-result' | 'full-importing'  // Mission 007
+  | 'importing' | 'success' | 'error';
+
+export interface TestImportResult {
+  success: boolean;
+  rowsImported: number;
+  matchingColumn: string;
+  matchingValues: string[];
+  verification: VerificationResult;
+  duration: number;
+}
+
+export interface RollbackConfig {
+  workspaceId: string;
+  viewId: string;
+  matchingColumn: string;
+  matchingValues: string[];
+  reason: 'verification_failed' | 'user_cancelled' | 'error_recovery';
+}
+
+export interface RollbackResult {
+  success: boolean;
+  deletedRows: number;
+  duration: number;
+  errorMessage?: string;
+  remainingValues?: string[];
+}
+```
+
+---
+
+## Base de données Supabase
+
+### Schéma : csv_importer
 
 ```sql
--- Tokens Zoho (chiffrés AES-256-GCM)
+-- Tokens OAuth Zoho chiffrés
 CREATE TABLE zoho_tokens (
-  id UUID PRIMARY KEY,
-  user_id UUID REFERENCES auth.users(id),
-  access_token TEXT NOT NULL,      -- Chiffré
-  refresh_token TEXT NOT NULL,     -- Chiffré
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+  access_token_encrypted TEXT NOT NULL,
+  refresh_token_encrypted TEXT NOT NULL,
   api_domain TEXT NOT NULL,
-  org_id TEXT,
+  token_type TEXT DEFAULT 'Bearer',
   expires_at TIMESTAMPTZ NOT NULL,
   created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(user_id)
 );
 
--- Profils d'import (1 profil = 1 table)
+-- Profils d'import (1 par table Zoho)
 CREATE TABLE import_profiles (
-  id UUID PRIMARY KEY,
-  name TEXT NOT NULL,
-  workspace_id TEXT NOT NULL,
-  view_id TEXT UNIQUE NOT NULL,    -- Garantit 1 profil par table
-  import_mode TEXT DEFAULT 'append',
-  matching_column TEXT,            -- Pour modes UPDATE*
-  column_config JSONB DEFAULT '[]',
-  date_formats JSONB DEFAULT '{}',
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW(),
+  name TEXT NOT NULL,
+  workspace_id TEXT NOT NULL,
+  workspace_name TEXT,
+  view_id TEXT NOT NULL UNIQUE,  -- Contrainte 1:1
+  view_name TEXT,
+  import_mode TEXT NOT NULL DEFAULT 'append',
+  matching_columns TEXT[],
+  date_format TEXT DEFAULT 'dd/MM/yyyy',
+  column_mappings JSONB DEFAULT '[]',
+  known_formats JSONB DEFAULT '{}',
+  verification_column TEXT,  -- NOUVEAU (Mission 007)
+  description TEXT,
   last_used_at TIMESTAMPTZ,
-  import_count INTEGER DEFAULT 0
+  use_count INTEGER DEFAULT 0
 );
 
 -- Historique des imports
 CREATE TABLE import_history (
-  id UUID PRIMARY KEY,
-  user_id UUID REFERENCES auth.users(id),
-  profile_id UUID REFERENCES import_profiles(id),
-  file_name TEXT NOT NULL,
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+  profile_id UUID REFERENCES import_profiles(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  filename TEXT NOT NULL,
   rows_imported INTEGER NOT NULL,
   duration_ms INTEGER,
-  status TEXT DEFAULT 'success',
+  status TEXT NOT NULL,  -- 'success', 'partial', 'error'
   error_message TEXT,
-  created_at TIMESTAMPTZ DEFAULT NOW()
+  verification_result JSONB
 );
+
+-- Index
+CREATE INDEX idx_profiles_view_id ON import_profiles(view_id);
+CREATE INDEX idx_history_user ON import_history(user_id);
+CREATE INDEX idx_history_profile ON import_history(profile_id);
 ```
 
 ---
@@ -400,23 +451,30 @@ APP_URL=http://localhost:3000
   * Rapport d'anomalies (date inversée, troncature, arrondi)
   * Normalisation des nombres (50.0 = 50)
 
-### 📋 Mission 007 : Import 2 phases + Rollback (spécifiée)
+### 🟡 Mission 007 : Import 2 phases + Rollback (EN COURS)
 
-Nouveau flux sécurisé :
+**Phase 1 complète (Session 1)** :
 
-1. **Import Test** : 5 lignes (configurable)
-2. **Vérification** : Comparer envoyé vs Zoho
-3. **Décision** :
-   * Si OK → Import du reste
-   * Si KO → Rollback + correction profil
+* ✅ API DELETE Zoho (`/api/zoho/delete`)
+* ✅ Service rollback (`lib/domain/rollback/`)
+* ✅ Détection améliorée colonne matching (patterns + unicité)
+* ✅ `step-test-import.tsx` - Import 5 lignes + attente + vérification
+* ✅ `step-test-result.tsx` - Tableau comparatif Fichier/Normalisée/Zoho
+* ✅ Intégration wizard (nouveaux états, handlers, transitions)
+* ✅ Fix bugs React (double exécution, timing state)
 
-Fichiers à créer :
+**Tests réussis** :
 
-* `app/api/zoho/delete/route.ts` - API suppression
-* `lib/domain/rollback/` - Service rollback
-* `step-test-import.tsx`, `step-test-result.tsx` - Nouveaux écrans
+* Import test 5 lignes ✅
+* Vérification post-import ✅
+* Affichage tableau comparatif ✅
 
-Estimation : ~11h
+**À tester (Session 2)** :
+
+* Rollback après test
+* Import complet après confirmation
+* Gestion anomalies détectées
+* Forcer import malgré anomalies
 
 ### 📋 Futures missions
 
@@ -467,7 +525,7 @@ Flux Sevo, __EMPTY
 | `docs/architecture-cible-v3.md`           | Architecture technique             |
 | `mission-005-profils-import.md`           | Mission terminée ✅               |
 | `mission-006-COMPLETE.md`                 | Mission terminée ✅               |
-| `mission-007-import-2-phases-rollback.md` | Mission spécifiée 📋             |
+| `mission-007-import-2-phases-rollback.md` | Mission en cours 🟡                |
 
 ---
 
@@ -528,8 +586,13 @@ fetch('/api/profiles').then(r => r.json()).then(console.log)
 22. **Normalisation nombres** : `50.0` vs `50` maintenant considérés égaux
 23. **Type ImportMode** : Utiliser le type existant au lieu de redéfinir
 
+### Mission 007 (Session 1)
+
+24. **Double exécution React StrictMode** : Ajout `useRef` pour éviter double appel dans useEffect
+25. **State timing entre fonctions** : Ajout `verificationSampleRef` pour accès immédiat à l'échantillon
+
 ---
 
 *Ce document doit être mis à jour lorsque les types fondamentaux ou l'architecture changent.*
 
-*Dernière mise à jour : 2025-12-05*
+*Dernière mise à jour : 2025-12-05 (Session 1 Mission 007)*
