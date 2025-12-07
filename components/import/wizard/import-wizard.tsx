@@ -661,6 +661,10 @@ const testMatchingValuesRef = useRef<string[]>([]);
     schemaValidation.resolvableIssues.length > 0 && 
     !issuesResolved;
 
+    console.log('[Wizard] hasUnresolvedIssues:', hasUnresolvedIssues);
+console.log('[Wizard] schemaValidation?.resolvableIssues:', schemaValidation?.resolvableIssues?.length);
+console.log('[Wizard] issuesResolved:', issuesResolved);
+
     // ==========================================================================
 // Handlers pour l'import en 2 phases
 // ==========================================================================

@@ -160,13 +160,14 @@ export function StepProfile({
       {viewMode === 'error' && <ErrorView error={error} onRetry={analyzeFileAndFindProfiles} />}
         {viewMode === 'matches' && (
         <MatchesView
-          matches={matchResults}
-          selectedMatch={selectedMatch}
-          onSelectMatch={setSelectedMatch}
-          onUseProfile={handleUseProfile}
-          onSkip={handleSkip}
-          onProfileUpdated={analyzeFileAndFindProfiles}
-        />
+    matches={matchResults}
+    selectedMatch={selectedMatch}
+    onSelectMatch={setSelectedMatch}
+    onUseProfile={handleUseProfile}
+    onCreateNew={handleCreateNew}  // ← AJOUTER
+    onSkip={handleSkip}
+    onProfileUpdated={analyzeFileAndFindProfiles}
+  />
       )}
       {viewMode === 'no-match' && (
         <NoMatchView
@@ -239,6 +240,7 @@ interface MatchesViewProps {
   selectedMatch: ProfileMatchResult | null;
   onSelectMatch: (match: ProfileMatchResult) => void;
   onUseProfile: () => void;
+  onCreateNew: () => void;  // ← AJOUTER
   onSkip: () => void;
   onProfileUpdated: () => void;
 }
@@ -249,6 +251,7 @@ function MatchesView({
   onSelectMatch,
   onUseProfile,
   onSkip,
+  onCreateNew,
   onProfileUpdated
 }: MatchesViewProps) {
   const [showEditDialog, setShowEditDialog] = useState(false);
@@ -435,26 +438,48 @@ function MatchesView({
         isLoading={isDeleting}
       />
 
-      
-     {/* Option import ponctuel */}
-      <Card
-        className="cursor-pointer hover:border-primary/50 transition-colors"
-        onClick={onSkip}
-      >
-        <CardContent className="py-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-full bg-muted">
-              <Zap className="h-5 w-5" />
+    {/* Options alternatives */}
+      <div className="grid grid-cols-2 gap-3">
+        {/* Créer nouveau profil vers autre table */}
+        <Card
+          className="cursor-pointer hover:border-primary/50 transition-colors"
+          onClick={onCreateNew}
+        >
+          <CardContent className="py-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-full bg-primary/10">
+                <Plus className="h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <p className="font-medium text-sm">Nouveau profil</p>
+                <p className="text-xs text-muted-foreground">
+                  Vers une autre table Zoho
+                </p>
+              </div>
             </div>
-            <div>
-              <p className="font-medium text-sm">Import ponctuel</p>
-              <p className="text-xs text-muted-foreground">
-                Importer sans utiliser le profil existant
-              </p>
+          </CardContent>
+        </Card>
+
+        {/* Import ponctuel */}
+        <Card
+          className="cursor-pointer hover:border-primary/50 transition-colors"
+          onClick={onSkip}
+        >
+          <CardContent className="py-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-full bg-muted">
+                <Zap className="h-5 w-5" />
+              </div>
+              <div>
+                <p className="font-medium text-sm">Import ponctuel</p>
+                <p className="text-xs text-muted-foreground">
+                  Sans créer de profil
+                </p>
+              </div>
             </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      </div>
 
       {/* Autres profils compatibles */}
       {matches.length > 1 && (

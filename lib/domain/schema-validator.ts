@@ -724,7 +724,12 @@ export function detectResolvableIssues(
     }
   });
   
-  return issues;
+
+ console.log('[detectResolvableIssues] profile:', profile ? profile.name : 'UNDEFINED');
+console.log('[detectResolvableIssues] issues count:', issues.length);
+issues.forEach(issue => console.log(`  - ${issue.type}: ${issue.column}`));
+
+return issues;
 }
 
 // ==================== VALIDATION PRINCIPALE ====================
@@ -819,6 +824,7 @@ export function validateSchema(params: ValidateSchemaParams): SchemaValidationRe
   
   // 4. Détecter les problèmes résolubles (⚠️ bloquant)
   const resolvableIssues = detectResolvableIssues(fileHeaders, sampleData, matchedColumns, params.profile);
+  console.log('[validateSchema] resolvableIssues:', resolvableIssues.length);
   
   // 5. Calculer le résumé
   const errorCount = typeWarnings.filter(w => w.severity === 'error').length;
