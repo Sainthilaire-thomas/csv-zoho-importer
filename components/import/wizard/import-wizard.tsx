@@ -117,6 +117,9 @@ const [matchingColumnResult, setMatchingColumnResult] = useState<MatchingColumnR
 const [testMatchingValues, setTestMatchingValues] = useState<string[]>([]);
 // Ref pour accès immédiat à l'échantillon (évite le délai du state React)
 const verificationSampleRef = useRef<SentRow[]>([]);
+// Refs pour accès immédiat aux valeurs de matching (évite le délai du state React)
+const verificationColumnRef = useRef<string | null>(null);
+const testMatchingValuesRef = useRef<string[]>([]);
 
   // Charger les workspaces au montage
   useEffect(() => {
@@ -675,6 +678,7 @@ const handleStartTestImport = useCallback(async () => {
     });
     setMatchingColumnResult(result);
     setVerificationColumn(result.column || null);
+verificationColumnRef.current = result.column || null;  // Stockage immédiat
   }
 
   startTestImport();
@@ -697,24 +701,42 @@ const executeTestImport = useCallback(async (): Promise<{ success: boolean; erro
 
     // Prendre l'échantillon
     const sampleData = validData.slice(0, testSampleSize);
-    
-    // Sauvegarder les valeurs de matching pour le rollback
-    if (verificationColumn) {
-      const values = sampleData
-        .map(row => String((row as Record<string, unknown>)[verificationColumn] ?? '').trim())
-        .filter(v => v !== '');
-      setTestMatchingValues(values);
-    }
 
-    // Construire l'échantillon pour vérification
+    // Construire l'échantillon pour vérification (DÉPLACÉ ICI)
     const sampleRows: SentRow[] = sampleData.map((row, index) => ({
       index: index + 2,
       data: Object.fromEntries(
         Object.entries(row).map(([k, v]) => [k, String(v ?? '')])
       ) as Record<string, string>,
     }));
+
+    // Détecter la colonne de matching si pas encore fait
+    let matchingCol = verificationColumn;
+    if (!matchingCol && sampleRows.length > 0) {
+      const result = findBestMatchingColumnEnhanced(sampleRows, {
+        profile: selectedProfile || undefined,
+        zohoSchema: zohoSchema?.columns,
+      });
+      matchingCol = result.column || null;
+      setVerificationColumn(matchingCol);
+      verificationColumnRef.current = matchingCol;
+      setMatchingColumnResult(result);
+      console.log('[TestImport] Detected matching column:', matchingCol);
+    }
+
+    // Sauvegarder les valeurs de matching pour le rollback
+    if (matchingCol) {
+      const values = sampleRows
+        .map(row => String(row.data[matchingCol!] ?? '').trim())
+        .filter(v => v !== '');
+      setTestMatchingValues(values);
+      testMatchingValuesRef.current = values;
+      console.log('[TestImport] Matching values:', values);
+    }
+
+    // Stocker l'échantillon
     setVerificationSample(sampleRows);
-    verificationSampleRef.current = sampleRows; // Stockage immédiat
+    verificationSampleRef.current = sampleRows;
 
     // Convertir en CSV
     const csvData = Papa.unparse(sampleData);
@@ -748,7 +770,7 @@ const executeTestImport = useCallback(async (): Promise<{ success: boolean; erro
       error: error instanceof Error ? error.message : 'Erreur inconnue' 
     };
   }
-}, [parsedData, state.config, state.validation, testSampleSize, verificationColumn, selectedWorkspaceId, matchingColumns]);
+}, [parsedData, state.config, state.validation, testSampleSize, verificationColumn, selectedWorkspaceId, matchingColumns, selectedProfile, zohoSchema]);
 
 /**
  * Exécute la vérification après import test
@@ -813,35 +835,42 @@ const handleTestError = useCallback((error: string) => {
  * Exécute le rollback
  */
 const handleRollback = useCallback(async (): Promise<RollbackResult> => {
-  if (!verificationColumn || testMatchingValues.length === 0) {
+  // Utiliser les refs pour accès immédiat
+  const column = verificationColumnRef.current;
+  const values = testMatchingValuesRef.current;
+  
+  console.log('[Rollback] Using refs:', { column, values });
+  
+  if (!column || values.length === 0) {
     return {
       success: false,
       deletedRows: 0,
       duration: 0,
       errorMessage: 'Pas de données à supprimer',
-      remainingValues: testMatchingValues,
+      remainingValues: values,
     };
   }
 
   const result = await executeRollback({
     workspaceId: selectedWorkspaceId,
     viewId: state.config.tableId,
-    matchingColumn: verificationColumn,
-    matchingValues: testMatchingValues,
+    matchingColumn: column,
+    matchingValues: values,
     reason: 'user_cancelled',
   });
 
   if (result.success) {
     // Retour à l'étape de preview pour corriger
     goToStep('previewing');
-    // Reset les états de test
+    // Reset les états ET les refs
     setTestMatchingValues([]);
+    testMatchingValuesRef.current = [];
     setVerificationSample([]);
+    verificationSampleRef.current = [];
   }
 
   return result;
-}, [verificationColumn, testMatchingValues, selectedWorkspaceId, state.config.tableId, goToStep]);
-
+}, [selectedWorkspaceId, state.config.tableId, goToStep]);
 /**
  * Confirme l'import complet après test réussi
  */
@@ -932,7 +961,9 @@ const handleConfirmFullImport = useCallback(async () => {
     setProfileMode('skip');
     setVerificationSample([]);
     setTestMatchingValues([]);
-    setVerificationColumn(null);
+testMatchingValuesRef.current = [];
+setVerificationColumn(null);
+verificationColumnRef.current = null;
 
   } catch (error) {
     console.error('Erreur import complet:', error);

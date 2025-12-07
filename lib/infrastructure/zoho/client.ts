@@ -775,71 +775,63 @@ export class ZohoAnalyticsClient {
    * @param criteria - Critère SQL de suppression (ex: "\"NuméroQuittance\" IN ('val1','val2')")
    * @returns Nombre de lignes supprimées
    */
-  async deleteData(
-    workspaceId: string,
-    viewId: string,
-    criteria: string
-  ): Promise<{ deletedRows: number }> {
-    // Construire le CONFIG
-    const config = {
-      criteria: criteria,
-    };
+async deleteData(
+  workspaceId: string,
+  viewId: string,
+  criteria: string
+): Promise<{ deletedRows: number }> {
+  console.log('[Zoho Delete] Criteria:', criteria);
 
-    const configEncoded = encodeURIComponent(JSON.stringify(config));
-    const url = `/workspaces/${workspaceId}/views/${viewId}/data?CONFIG=${configEncoded}`;
+  // Construire les headers
+  const headers: Record<string, string> = {
+    'Authorization': `Zoho-oauthtoken ${this.tokens.accessToken}`,
+  };
 
-    console.log('[Zoho Delete] URL:', url);
-    console.log('[Zoho Delete] Criteria:', criteria);
-
-    // Construire les headers
-    const headers: Record<string, string> = {
-      'Authorization': `Zoho-oauthtoken ${this.tokens.accessToken}`,
-    };
-
-    if (this.tokens.orgId) {
-      headers['ZANALYTICS-ORGID'] = this.tokens.orgId;
-    }
-
-    const fullUrl = `${this.tokens.apiDomain}/restapi/v2${url}`;
-
-    const response = await fetch(fullUrl, {
-      method: 'DELETE',
-      headers,
-    });
-
-    const responseText = await response.text();
-    console.log('[Zoho Delete] Status:', response.status);
-
-    let responseData: any;
-    try {
-      responseData = JSON.parse(responseText);
-    } catch {
-      responseData = { message: responseText };
-    }
-
-    if (!response.ok) {
-      console.error('[Zoho Delete] Error:', JSON.stringify(responseData, null, 2));
-
-      if (response.status === 401) {
-        throw new ZohoAuthError('Token Zoho invalide ou expiré', 'invalid_grant', true);
-      }
-
-      throw new ZohoApiError(
-        responseData.data?.errorMessage || responseData.message || `Erreur API Zoho : ${response.status}`,
-        responseData.data?.errorCode || responseData.error_code || 'API_ERROR',
-        response.status
-      );
-    }
-
-    // La réponse Zoho pour DELETE contient le nombre de lignes supprimées
-    const deletedRows = responseData.data?.deletedRows || 
-                        responseData.data?.affectedRows || 
-                        responseData.data?.rowCount || 0;
-
-    console.log('[Zoho Delete] Rows deleted:', deletedRows);
-
-    return { deletedRows };
+  if (this.tokens.orgId) {
+    headers['ZANALYTICS-ORGID'] = this.tokens.orgId;
   }
+
+  // CONFIG encodé dans l'URL
+  const config = JSON.stringify({ criteria });
+  const configEncoded = encodeURIComponent(config);
+  
+  // IMPORTANT: utiliser /rows et non /data
+  const url = `/workspaces/${workspaceId}/views/${viewId}/rows?CONFIG=${configEncoded}`;
+  const fullUrl = `${this.tokens.apiDomain}/restapi/v2${url}`;
+  
+  console.log('[Zoho Delete] URL:', fullUrl);
+  console.log('[Zoho Delete] CONFIG:', config);
+
+  // Méthode DELETE standard
+  const response = await fetch(fullUrl, {
+    method: 'DELETE',
+    headers,
+  });
+
+  console.log('[Zoho Delete] Status:', response.status);
+
+  const responseText = await response.text();
+  let data;
+  try {
+    data = JSON.parse(responseText);
+  } catch {
+    data = { raw: responseText };
+  }
+
+  console.log('[Zoho Delete] Response:', JSON.stringify(data, null, 2));
+
+  if (!response.ok) {
+    throw new ZohoApiError(
+      data?.data?.errorMessage || data?.message || 'Delete failed',
+      data?.data?.errorCode || response.status,
+      response.status
+    );
+  }
+
+  return {
+    deletedRows: data?.data?.deletedRows || data?.deletedRows || 0,
+  };
+}
   
   // ==================== HELPERS ====================
 
