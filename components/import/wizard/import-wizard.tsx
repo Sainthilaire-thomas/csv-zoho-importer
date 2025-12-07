@@ -33,6 +33,7 @@ import type { FileSource, TableValidationConfig } from '@/types';
 import type { SchemaValidationResult, ZohoTableSchema, ResolvableIssue } from '@/lib/infrastructure/zoho/types';
 import type { ImportProfile, ProfileMatchResult, DetectedColumn } from '@/types/profiles';
 import Papa from 'papaparse';
+import { toast } from 'sonner';
 
 interface ZohoWorkspace {
   id: string;
@@ -860,6 +861,7 @@ const handleRollback = useCallback(async (): Promise<RollbackResult> => {
   });
 
   if (result.success) {
+     toast.success(`${result.deletedRows} lignes supprimées de Zoho`);
     // Retour à l'étape de preview pour corriger
     goToStep('previewing');
     // Reset les états ET les refs
