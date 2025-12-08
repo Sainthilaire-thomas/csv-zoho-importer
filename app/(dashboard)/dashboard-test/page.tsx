@@ -1,11 +1,6 @@
 /**
  * @file app/(dashboard)/dashboard-test/page.tsx
  * @description Page de test pour l'intégration iframe du dashboard PQS
- * 
- * Permet de :
- * 1. Saisir une adresse email
- * 2. Faire le lookup pour trouver le Cpte_Matriculaire
- * 3. Afficher le dashboard filtré dans une iframe
  */
 
 'use client';
@@ -30,6 +25,7 @@ interface LookupResult {
 export default function DashboardTestPage() {
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
+  const [pdfLoading, setPdfLoading] = useState(false);
   const [result, setResult] = useState<LookupResult | null>(null);
   const [showIframe, setShowIframe] = useState(false);
 
@@ -66,7 +62,45 @@ export default function DashboardTestPage() {
     }
   };
 
-  // Liste d'emails de test (depuis la table Agents_SC)
+  const handleDownloadPDF = async () => {
+    if (!email.trim()) return;
+
+    setPdfLoading(true);
+
+    try {
+      const response = await fetch('/api/zoho/dashboard-pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim() }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        alert(error.error || 'Erreur lors de la génération du PDF');
+        return;
+      }
+
+      // Télécharger le PDF
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      
+      // Créer un lien de téléchargement
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `bilan-pqs-${result?.agent?.nom?.toLowerCase() || 'conseiller'}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Erreur PDF:', error);
+      alert('Erreur lors de la génération du PDF');
+    } finally {
+      setPdfLoading(false);
+    }
+  };
+
+  // Liste d'emails de test
   const testEmails = [
     'sandrine.auberger@ratp.fr',
     'naouelle.adesir@ratp.fr',
@@ -85,7 +119,7 @@ export default function DashboardTestPage() {
       {/* Formulaire de test */}
       <Card className="p-6 mb-6">
         <h2 className="text-lg font-semibold mb-4">1. Saisir l'email du conseiller</h2>
-        
+
         <div className="flex gap-4 mb-4">
           <input
             type="email"
@@ -119,7 +153,7 @@ export default function DashboardTestPage() {
       {result && (
         <Card className="p-6 mb-6">
           <h2 className="text-lg font-semibold mb-4">2. Résultat du lookup</h2>
-          
+
           {result.success ? (
             <div className="space-y-3">
               <div className="grid grid-cols-2 gap-4 text-sm">
@@ -141,11 +175,35 @@ export default function DashboardTestPage() {
                 </div>
               </div>
 
+              {/* Bouton PDF */}
+              <div className="mt-4 pt-4 border-t">
+                <Button
+                  onClick={handleDownloadPDF}
+                  disabled={pdfLoading}
+                  variant="outline"
+                  className="w-full sm:w-auto"
+                >
+                  {pdfLoading ? (
+                    <>
+                      <span className="animate-spin mr-2">⏳</span>
+                      Génération du PDF... (30-60s)
+                    </>
+                  ) : (
+                    <>
+                      📄 Télécharger le bilan PDF
+                    </>
+                  )}
+                </Button>
+                <p className="text-xs text-gray-500 mt-2">
+                  Le PDF contient les KPIs, primes trimestrielles et détail mensuel.
+                </p>
+              </div>
+
               <div className="mt-4 p-3 bg-gray-100 dark:bg-gray-800 rounded text-xs font-mono break-all">
                 <div className="text-gray-500 mb-1">URL avec filtre ZOHO_CRITERIA :</div>
-                <a 
-                  href={result.embedUrl} 
-                  target="_blank" 
+                
+                  <a href={result.embedUrl}
+                  target="_blank"
                   rel="noopener noreferrer"
                   className="text-blue-600 hover:underline"
                 >
@@ -202,7 +260,7 @@ export default function DashboardTestPage() {
           </div>
 
           <p className="text-xs text-gray-500 mt-3">
-            💡 Cette iframe simule l'intégration dans le portail Zoho Desk. 
+            💡 Cette iframe simule l'intégration dans le portail Zoho Desk.
             Le filtrage se fait via le paramètre ZOHO_CRITERIA sur le Cpte_Matriculaire.
           </p>
         </Card>
