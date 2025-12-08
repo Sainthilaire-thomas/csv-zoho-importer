@@ -1,7 +1,7 @@
 
 # CSV to Zoho Analytics Importer - Contexte de Base
 
-*Mis à jour le 2025-12-07 (Mission 007 terminée)*
+*Mis à jour le 2025-12-07 (Mission 007 terminée, Mission 008 en cours)*
 
 ---
 
@@ -98,13 +98,13 @@ Fichiers Excel          PROFIL                    Table Zoho
 
 ### Modes d'import
 
-| Mode                   | Clé requise    | Description                         |
-| ---------------------- | --------------- | ----------------------------------- |
-| **APPEND**       | ❌ Non          | Ajoute les lignes à la fin         |
-| **TRUNCATEADD**  | ❌ Non          | Vide la table, réimporte tout      |
-| **UPDATEADD**    | ✅**Oui** | Met à jour si existe, ajoute sinon |
-| **DELETEUPSERT** | ✅**Oui** | Supprime absents + upsert           |
-| **ONLYADD**      | ✅**Oui** | Ajoute uniquement les nouveaux      |
+| Mode                   | Clé requise | Description                         |
+| ---------------------- | ------------ | ----------------------------------- |
+| **APPEND**       | ❌ Non       | Ajoute les lignes à la fin         |
+| **TRUNCATEADD**  | ❌ Non       | Vide la table, réimporte tout      |
+| **UPDATEADD**    | ✅ Oui       | Met à jour si existe, ajoute sinon |
+| **DELETEUPSERT** | ✅ Oui       | Supprime absents + upsert           |
+| **ONLYADD**      | ✅ Oui       | Ajoute uniquement les nouveaux      |
 
 ### Formats universels
 
@@ -137,7 +137,7 @@ Fichiers Excel          PROFIL                    Table Zoho
 │                                ▼                                                │
 │                   API LAYER (Route Handlers)                                    │
 │   /zoho/oauth/*  /zoho/workspaces  /zoho/tables  /zoho/columns  /zoho/import   │
-│   /zoho/data     /zoho/delete      /profiles/*   /profiles/match               │
+│   /zoho/data     /zoho/delete      /zoho/dashboard-embed    /profiles/*        │
 └─────────────────────────────────────────────────────────────────────────────────┘
                               │
               ┌───────────────┼───────────────┐
@@ -208,10 +208,10 @@ lib/domain/verification/
 │                         # Anomaly, ComparedRow, ComparedColumn
 ├── compare.ts            # verifyImport(), compareRowsDetailed(),
 │                         # findBestMatchingColumn(), normalizeValue()
-├── matching-detection.ts # findBestMatchingColumnEnhanced() ← NOUVEAU
+├── matching-detection.ts # findBestMatchingColumnEnhanced()
 └── index.ts              # Exports publics
 
-lib/domain/rollback/      # ← NOUVEAU (Mission 007)
+lib/domain/rollback/
 ├── types.ts              # RollbackConfig, RollbackResult, RollbackReason
 ├── rollback-service.ts   # executeRollback(), formatRollbackReason()
 └── index.ts              # Exports publics
@@ -243,10 +243,10 @@ Priorité de sélection :
 ### Affichage UI (tableau 3 colonnes)
 
 ```
-| Colonne | 📄 Fichier | 🔄 Normalisée | ☁️ Zoho | Statut |
-|---------|-----------|---------------|---------|--------|
-| CB      | 35.0      | 35            | 35      | ✅     |
-| Date    | 05/03/2025| 05/03/2025    | 2025-03-05 | ✅  |
+| Colonne | 📄 Fichier | 🔄 Normalisée | ☁️ Zoho    | Statut |
+|---------|------------|---------------|------------|--------|
+| CB      | 35.0       | 35            | 35         | ✅     |
+| Date    | 05/03/2025 | 05/03/2025    | 2025-03-05 | ✅     |
 ```
 
 ---
@@ -259,49 +259,53 @@ csv-zoho-importer/
 │   ├── (auth)/
 │   │   ├── login/page.tsx
 │   │   └── register/page.tsx
+│   ├── (dashboard)/
+│   │   └── dashboard-test/page.tsx    # Test iframe PQS (Mission 008)
 │   ├── api/
 │   │   ├── zoho/
-│   │   │   ├── oauth/          # Callback, status, disconnect
-│   │   │   ├── workspaces/     # Liste workspaces
-│   │   │   ├── tables/         # Liste tables par workspace
-│   │   │   ├── columns/        # Colonnes d'une table
-│   │   │   ├── import/         # Import des données
-│   │   │   ├── data/           # GET données (vérification)
-│   │   │   └── delete/         # DELETE données (rollback) ← NOUVEAU
-│   │   └── profiles/           # CRUD profils + match
-│   ├── import/page.tsx         # Wizard principal
+│   │   │   ├── oauth/              # Callback, status, disconnect
+│   │   │   ├── workspaces/         # Liste workspaces
+│   │   │   ├── tables/             # Liste tables par workspace
+│   │   │   ├── columns/            # Colonnes d'une table
+│   │   │   ├── import/             # Import des données
+│   │   │   ├── data/               # GET données (vérification)
+│   │   │   ├── delete/             # DELETE données (rollback)
+│   │   │   ├── dashboard-embed/    # Lookup + URL filtrée (Mission 008)
+│   │   │   └── test-private-url/   # Tests techniques (Mission 008)
+│   │   └── profiles/               # CRUD profils + match
+│   ├── import/page.tsx             # Wizard principal
 │   ├── history/page.tsx
 │   ├── settings/page.tsx
-│   └── layout.tsx              # + Toaster (sonner)
+│   └── layout.tsx                  # + Toaster (sonner)
 ├── components/
 │   ├── import/wizard/
-│   │   ├── import-wizard.tsx   # Orchestrateur (10 étapes)
+│   │   ├── import-wizard.tsx       # Orchestrateur (10 étapes)
 │   │   ├── step-upload.tsx
 │   │   ├── step-profile.tsx
 │   │   ├── step-schema.tsx
 │   │   ├── step-validation.tsx
 │   │   ├── step-transform-preview.tsx
 │   │   ├── step-review.tsx
-│   │   ├── step-test-import.tsx    # ← NOUVEAU
-│   │   ├── step-test-result.tsx    # ← NOUVEAU
-│   │   ├── matching-column-selector.tsx # ← NOUVEAU
-│   │   └── step-confirm.tsx    # + rapport vérification
-│   └── ui/                     # Composants réutilisables
+│   │   ├── step-test-import.tsx
+│   │   ├── step-test-result.tsx
+│   │   ├── matching-column-selector.tsx
+│   │   └── step-confirm.tsx        # + rapport vérification
+│   └── ui/                         # Composants réutilisables
 ├── lib/
 │   ├── domain/
-│   │   ├── validation/         # Moteur de validation
-│   │   ├── transform/          # Transformations données
-│   │   ├── profile/            # Gestion profils
-│   │   ├── verification/       # Vérification post-import
-│   │   └── rollback/           # Service rollback ← NOUVEAU
+│   │   ├── validation/             # Moteur de validation
+│   │   ├── transform/              # Transformations données
+│   │   ├── profile/                # Gestion profils
+│   │   ├── verification/           # Vérification post-import
+│   │   └── rollback/               # Service rollback
 │   └── infrastructure/
 │       ├── supabase/
 │       └── zoho/
-│           ├── client.ts       # Client API (import, export, delete)
-│           └── types.ts
+│           ├── client.ts           # Client API (import, export, delete)
+│           └── types.ts            # Inclut scopes embed.read/update
 ├── types/
-│   └── index.ts                # Types partagés
-└── docs/                       # Documentation
+│   └── index.ts                    # Types partagés
+└── docs/                           # Documentation
 ```
 
 ---
@@ -332,7 +336,7 @@ CREATE TABLE import_profiles (
   view_id TEXT UNIQUE NOT NULL,    -- Garantit 1 profil par table
   import_mode TEXT DEFAULT 'append',
   matching_column TEXT,            -- Pour modes UPDATE*
-  verification_column TEXT,        -- Pour vérification post-import ← NOUVEAU
+  verification_column TEXT,        -- Pour vérification post-import
   column_config JSONB DEFAULT '[]',
   date_formats JSONB DEFAULT '{}',
   created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -424,9 +428,39 @@ APP_URL=http://localhost:3000
   * Toast notifications (sonner)
   * Détection automatique colonne de matching améliorée
 
+### 🔄 Mission 008 : Distribution Dashboards (en cours)
+
+Distribution dashboards Zoho Analytics vers portails clients :
+
+**Phase A - Iframe Dashboard ✅ COMPLÉTÉ**
+
+* Private URLs Zoho Analytics fonctionnelles
+* Lookup Email → Nom agent via table Agents_SC
+* Filtre ZOHO_CRITERIA dynamique
+* Page test `/dashboard-test`
+* API `/api/zoho/dashboard-embed`
+
+**Phase B - Génération PDF 📋 À FAIRE**
+
+* Récupération données temps réel via API Zoho
+* Template PDF avec @react-pdf/renderer
+* KPIs, tableaux, graphiques SVG
+* Zero data retention (mémoire uniquement)
+
+**Phase C - Intégration Zoho Desk 📋 FUTUR**
+
+* Widget Help Center
+* Récupération email JWT utilisateur
+
+Fichiers créés :
+
+* `app/(dashboard)/dashboard-test/page.tsx`
+* `app/api/zoho/dashboard-embed/route.ts`
+* `app/api/zoho/test-private-url/route.ts`
+
 ### 📋 Futures missions
 
-* [ ] Mission 008 : Éditeur de règles de validation avancé
+* [ ] Éditeur de règles de validation avancé
 * [ ] Connexion SFTP
 * [ ] Page Historique des imports enrichie
 * [ ] Déploiement Vercel
@@ -453,6 +487,28 @@ Matricule chef, CB, Espece, Cheque, Référence Nus TPE,
 Flux Sevo, __EMPTY
 ```
 
+### Workspace/Dashboard PQS (Mission 008)
+
+```
+Workspace: RATP Réseaux de Bus
+Workspace ID: 1718953000016707052
+
+Dashboard: Conseiller PQS 2025
+View ID: 1718953000033028262
+Private URL: https://analytics.zoho.com/open-view/1718953000033028262/2f22f56df5772565ad3c1e7648862c39
+
+Table lookup: Agents_SC
+View ID: 1718953000033132623
+Colonnes: Nom, Courriel, Matricule, Cpte_Matriculaire
+```
+
+### Filtrage ZOHO_CRITERIA
+
+```
+Syntaxe : ?ZOHO_CRITERIA=("Colonne"='Valeur')
+Exemple : ?ZOHO_CRITERIA=("Nom"='AUBERGER')
+```
+
 ### Formats à gérer
 
 | Colonne      | Format fichier | Format universel |
@@ -466,14 +522,15 @@ Flux Sevo, __EMPTY
 
 ## Documents de référence
 
-| Document                              | Description                        |
-| ------------------------------------- | ---------------------------------- |
-| `docs/specs-profils-import-v2.1.md` | Specs profils (v2.1 - 16 sections) |
-| `docs/specs-fonctionnelles.md`      | Specs originales                   |
-| `docs/architecture-cible-v3.md`     | Architecture technique             |
-| `mission-005-profils-import.md`     | Mission terminée ✅               |
-| `mission-006-COMPLETE.md`           | Mission terminée ✅               |
-| `mission-007-COMPLETE.md`           | Mission terminée ✅               |
+| Document                                  | Description                        |
+| ----------------------------------------- | ---------------------------------- |
+| `docs/specs-profils-import-v2.1.md`     | Specs profils (v2.1 - 16 sections) |
+| `docs/specs-fonctionnelles.md`          | Specs originales                   |
+| `docs/architecture-cible-v3.md`         | Architecture technique             |
+| `mission-005-profils-import.md`         | Mission terminée ✅               |
+| `mission-006-COMPLETE.md`               | Mission terminée ✅               |
+| `mission-007-COMPLETE.md`               | Mission terminée ✅               |
+| `mission-008-dashboard-distribution.md` | Mission en cours 🔄                |
 
 ---
 
@@ -493,6 +550,11 @@ npm run build
 
 # Vérifier profils existants (console navigateur)
 fetch('/api/profiles').then(r => r.json()).then(console.log)
+
+# Test API dashboard embed
+curl -X POST http://localhost:3000/api/zoho/dashboard-embed \
+  -H "Content-Type: application/json" \
+  -d '{"email": "sandrine.auberger@ratp.fr"}'
 ```
 
 ---
@@ -540,6 +602,27 @@ fetch('/api/profiles').then(r => r.json()).then(console.log)
 25. **Timing state React** : `verificationSampleRef` pour accès immédiat (pas attendre setState)
 26. **API DELETE Zoho "Invalid method"** : Endpoint `/views/{viewId}/rows` (pas `/data`)
 27. **Refs non remplies pour rollback** : Détection colonne dans `executeTestImport` (pas avant)
+
+### Mission 008
+
+28. **Scope OAuth Private URL** : Zoho doc indique `embed.create` mais API requiert `embed.update`
+29. **Format réponse Zoho data** : API retourne CSV par défaut (pas JSON), parser avec split('\n')
+30. **Colonne filtre dashboard** : Utiliser `"Nom"` (pas `"Mle"`) pour ZOHO_CRITERIA
+31. **Erreurs SVG console** : Bugs internes Zoho (dimensions négatives), n'impactent pas l'affichage
+
+---
+
+## Scopes OAuth Zoho
+
+```typescript
+// lib/infrastructure/zoho/types.ts
+export const ZOHO_SCOPES = [
+  'ZohoAnalytics.metadata.all',
+  'ZohoAnalytics.data.all',
+  'ZohoAnalytics.embed.read',   // Lire Private URLs
+  'ZohoAnalytics.embed.update', // Créer Private URLs
+] as const;
+```
 
 ---
 

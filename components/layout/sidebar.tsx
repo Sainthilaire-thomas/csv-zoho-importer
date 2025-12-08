@@ -4,12 +4,13 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Upload, History, Settings } from 'lucide-react';
+import { Upload, History, Settings,BeakerIcon } from 'lucide-react';
 
 const navigation = [
   { name: 'Import', href: '/import', icon: Upload },
   { name: 'Historique', href: '/history', icon: History },
   { name: 'Paramètres', href: '/settings', icon: Settings },
+  { name: 'Test Dashboard', href: '/dashboard-test', icon: BeakerIcon }
 ];
 
 export function Sidebar() {

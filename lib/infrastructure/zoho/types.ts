@@ -53,6 +53,8 @@ export const ZOHO_REGIONS: Record<ZohoRegion, ZohoRegionConfig> = {
 export const ZOHO_SCOPES = [
   'ZohoAnalytics.metadata.all',
   'ZohoAnalytics.data.all',
+  'ZohoAnalytics.embed.read',
+  'ZohoAnalytics.embed.update',
 ] as const;
 
 /**

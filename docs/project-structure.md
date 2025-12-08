@@ -1,6 +1,6 @@
 ﻿# Structure du projet - csv-zoho-importer
 
-*Genere le 2025-12-05 17:05:50*
+*Genere le 2025-12-07 17:39:40*
 ```
 csv-zoho-importer/
 |-- .vscode/
@@ -38,6 +38,8 @@ csv-zoho-importer/
 |   |       |   +-- route.ts
 |   |       |-- data/
 |   |       |   +-- route.ts
+|   |       |-- delete/
+|   |       |   +-- route.ts
 |   |       |-- folders/
 |   |       |   +-- route.ts
 |   |       |-- import/
@@ -60,12 +62,15 @@ csv-zoho-importer/
 |   |   |-- wizard/
 |   |   |   |-- import-wizard.tsx
 |   |   |   |-- index.ts
+|   |   |   |-- matching-column-selector.tsx
 |   |   |   |-- step-config.tsx
 |   |   |   |-- step-confirm.tsx
 |   |   |   |-- step-profile.tsx
 |   |   |   |-- step-resolve.tsx
 |   |   |   |-- step-review.tsx
 |   |   |   |-- step-source.tsx
+|   |   |   |-- step-test-import.tsx
+|   |   |   |-- step-test-result.tsx
 |   |   |   |-- step-transform-preview.tsx
 |   |   |   |-- step-validate.tsx
 |   |   |   |-- verification-report.tsx
@@ -106,6 +111,7 @@ csv-zoho-importer/
 |   |   |   |-- mission-005-profils-import.md
 |   |   |   |-- mission-006-COMPLETE.md
 |   |   |   |-- mission-006-preview-transformations.md
+|   |   |   |-- mission-007-complete.md
 |   |   |   |-- mission-007-import-2-phases-rollback.md
 |   |   |   +-- TEMPLATE-MISSION.md
 |   |   |-- base-context.md
@@ -133,6 +139,10 @@ csv-zoho-importer/
 |   |   |-- profile/
 |   |   |   |-- index.ts
 |   |   |   +-- profile-manager.ts
+|   |   |-- rollback/
+|   |   |   |-- index.ts
+|   |   |   |-- rollback-service.ts
+|   |   |   +-- types.ts
 |   |   |-- transformation/
 |   |   |   |-- index.ts
 |   |   |   +-- preview.ts
@@ -149,6 +159,7 @@ csv-zoho-importer/
 |   |   |-- verification/
 |   |   |   |-- compare.ts
 |   |   |   |-- index.ts
+|   |   |   |-- matching-detection.ts
 |   |   |   +-- types.ts
 |   |   |-- data-transformer.ts
 |   |   +-- schema-validator.ts
