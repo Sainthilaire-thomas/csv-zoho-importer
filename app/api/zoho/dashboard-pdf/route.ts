@@ -9,6 +9,7 @@ import { ZohoAnalyticsClient } from '@/lib/infrastructure/zoho';
 import { renderToBuffer } from '@react-pdf/renderer';
 import { BilanPQSDocument } from '@/lib/pdf/templates/bilan-pqs';
 import type { PQSRow } from '@/lib/pdf/types';
+import { PDFTemplateConfig, DEFAULT_CONFIG } from '@/lib/pdf/config';
 
 // Configuration
 const CONFIG = {
@@ -94,9 +95,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Non connecté à Zoho' }, { status: 401 });
     }
 
-    // 3. Body
+     // 3. Body
     const body = await request.json();
-    const { email } = body;
+    const { email, config: userConfig } = body;
+    
+    // Fusionner config utilisateur avec défaut
+    const config: PDFTemplateConfig = {
+      ...DEFAULT_CONFIG,
+      ...userConfig,
+      colors: { ...DEFAULT_CONFIG.colors, ...userConfig?.colors },
+      sections: { ...DEFAULT_CONFIG.sections, ...userConfig?.sections },
+      tableColumns: { ...DEFAULT_CONFIG.tableColumns, ...userConfig?.tableColumns },
+      kpis: { ...DEFAULT_CONFIG.kpis, ...userConfig?.kpis },
+    };
 
     if (!email) {
       return NextResponse.json({ error: 'Email requis' }, { status: 400 });
@@ -131,6 +142,7 @@ export async function POST(request: NextRequest) {
           rows: pqsData,
           generatedAt: new Date(),
         },
+        config,
       })
     );
 
