@@ -750,6 +750,214 @@ export class ZohoAnalyticsClient {
     };
   }
 
+  // ==================== EXPORT ASYNC (pour QueryTables) ====================
+
+  /**
+   * Export asynchrone des données - requis pour les QueryTables et Dashboards
+   * 
+   * Flow:
+   * 1. Créer un job d'export
+   * 2. Poll jusqu'à completion (jobCode 1004)
+   * 3. Télécharger les données
+   * 
+   * @param workspaceId - ID du workspace
+   * @param viewId - ID de la vue (QueryTable, etc.)
+   * @param options - Options d'export
+   * @returns Données exportées
+   */
+  async exportDataAsync(
+    workspaceId: string,
+    viewId: string,
+    options: {
+      criteria?: string;
+      responseFormat?: 'json' | 'csv';
+      maxWaitSeconds?: number;
+    } = {}
+  ): Promise<{ data: Record<string, unknown>[]; rowCount: number }> {
+    const { 
+      criteria, 
+      responseFormat = 'json',
+      maxWaitSeconds = 60 
+    } = options;
+
+    // Helper pour pause
+    const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+    // === ÉTAPE 1: Créer le job d'export ===
+    const config: Record<string, string> = { responseFormat };
+    if (criteria) {
+      config.criteria = criteria;
+    }
+    const configEncoded = encodeURIComponent(JSON.stringify(config));
+
+    const createUrl = `/bulk/workspaces/${workspaceId}/views/${viewId}/data?CONFIG=${configEncoded}`;
+    
+    console.log('[ExportAsync] Creating job for view:', viewId);
+
+    interface CreateJobResponse {
+      status: string;
+      data?: { jobId: string };
+    }
+
+    const createResponse = await this.request<CreateJobResponse>(createUrl);
+
+    if (createResponse.status !== 'success' || !createResponse.data?.jobId) {
+      throw new ZohoApiError(
+        'Échec de la création du job d\'export',
+        'EXPORT_JOB_CREATE_FAILED',
+        400
+      );
+    }
+
+    const jobId = createResponse.data.jobId;
+    console.log('[ExportAsync] Job created:', jobId);
+
+    // === ÉTAPE 2: Poll jusqu'à completion ===
+    interface JobStatusResponse {
+      status: string;
+      data?: {
+        jobId: string;
+        jobCode: string;
+        jobStatus: string;
+        downloadUrl?: string;
+      };
+    }
+
+    let jobStatus: JobStatusResponse | null = null;
+    let attempts = 0;
+    const maxAttempts = maxWaitSeconds; // 1 poll par seconde
+
+    while (attempts < maxAttempts) {
+      await sleep(1000);
+      attempts++;
+
+      const statusUrl = `/bulk/workspaces/${workspaceId}/exportjobs/${jobId}`;
+      jobStatus = await this.request<JobStatusResponse>(statusUrl);
+
+      const code = jobStatus.data?.jobCode;
+      console.log(`[ExportAsync] Poll ${attempts}: code=${code}, status=${jobStatus.data?.jobStatus}`);
+
+      if (code === '1004') {
+        // Job terminé !
+        break;
+      }
+
+      if (code === '1003') {
+        throw new ZohoApiError(
+          'Job d\'export échoué',
+          'EXPORT_JOB_FAILED',
+          500
+        );
+      }
+    }
+
+    if (attempts >= maxAttempts) {
+      throw new ZohoApiError(
+        `Timeout: le job d'export n'a pas terminé en ${maxWaitSeconds}s`,
+        'EXPORT_JOB_TIMEOUT',
+        408
+      );
+    }
+
+    // === ÉTAPE 3: Télécharger les données ===
+    const downloadUrl = `${this.tokens.apiDomain}/restapi/v2/bulk/workspaces/${workspaceId}/exportjobs/${jobId}/data`;
+    
+    console.log('[ExportAsync] Downloading data...');
+
+    const headers: Record<string, string> = {
+      'Authorization': `Zoho-oauthtoken ${this.tokens.accessToken}`,
+    };
+    if (this.tokens.orgId) {
+      headers['ZANALYTICS-ORGID'] = this.tokens.orgId;
+    }
+
+    const downloadResponse = await fetch(downloadUrl, {
+      method: 'GET',
+      headers,
+    });
+
+    if (!downloadResponse.ok) {
+      throw new ZohoApiError(
+        'Échec du téléchargement des données',
+        'EXPORT_DOWNLOAD_FAILED',
+        downloadResponse.status
+      );
+    }
+
+    const contentType = downloadResponse.headers.get('content-type');
+    
+    if (contentType?.includes('application/json')) {
+      interface DownloadResponse {
+        data: Record<string, unknown>[];
+      }
+      const result = await downloadResponse.json() as DownloadResponse;
+      const rows = Array.isArray(result.data) ? result.data : [];
+      
+      console.log('[ExportAsync] Downloaded', rows.length, 'rows');
+      
+      return {
+        data: rows,
+        rowCount: rows.length,
+      };
+    } else {
+      // CSV - parser manuellement
+      const csvText = await downloadResponse.text();
+      const rows = this.parseCSVToObjects(csvText);
+      
+      console.log('[ExportAsync] Downloaded', rows.length, 'rows (CSV)');
+      
+      return {
+        data: rows,
+        rowCount: rows.length,
+      };
+    }
+  }
+
+  /**
+   * Parse CSV en tableau d'objets
+   */
+  private parseCSVToObjects(csvText: string): Record<string, unknown>[] {
+    const lines = csvText.trim().split('\n');
+    if (lines.length < 2) return [];
+
+    // Parser les headers
+    const headers = this.parseCSVLine(lines[0]);
+    
+    // Parser les données
+    return lines.slice(1).map(line => {
+      const values = this.parseCSVLine(line);
+      const obj: Record<string, unknown> = {};
+      headers.forEach((header, i) => {
+        obj[header] = values[i] || '';
+      });
+      return obj;
+    });
+  }
+
+  /**
+   * Parse une ligne CSV (gestion des guillemets)
+   */
+  private parseCSVLine(line: string): string[] {
+    const values: string[] = [];
+    let current = '';
+    let inQuotes = false;
+
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i];
+      if (char === '"') {
+        inQuotes = !inQuotes;
+      } else if (char === ',' && !inQuotes) {
+        values.push(current.trim());
+        current = '';
+      } else {
+        current += char;
+      }
+    }
+    values.push(current.trim());
+
+    return values;
+  }
+
   /**
    * Construit un critère SQL pour filtrer sur une colonne
    * Utilisé pour la vérification post-import (mode UPDATE)

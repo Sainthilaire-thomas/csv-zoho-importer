@@ -1,6 +1,6 @@
 ﻿# Structure du projet - csv-zoho-importer
 
-*Genere le 2025-12-07 17:39:40*
+*Genere le 2025-12-08 07:36:47*
 ```
 csv-zoho-importer/
 |-- .vscode/
@@ -11,6 +11,8 @@ csv-zoho-importer/
 |   |   |   +-- page.tsx
 |   |   +-- layout.tsx
 |   |-- (dashboard)/
+|   |   |-- dashboard-test/
+|   |   |   +-- page.tsx
 |   |   |-- history/
 |   |   |   +-- page.tsx
 |   |   |-- import/
@@ -36,6 +38,8 @@ csv-zoho-importer/
 |   |   +-- zoho/
 |   |       |-- columns/
 |   |       |   +-- route.ts
+|   |       |-- dashboard-embed/
+|   |       |   +-- route.ts
 |   |       |-- data/
 |   |       |   +-- route.ts
 |   |       |-- delete/
@@ -50,6 +54,8 @@ csv-zoho-importer/
 |   |       |   |-- disconnect/
 |   |       |   +-- status/
 |   |       |-- tables/
+|   |       |   +-- route.ts
+|   |       |-- test-private-url/
 |   |       |   +-- route.ts
 |   |       +-- workspaces/
 |   |           +-- route.ts
@@ -113,6 +119,7 @@ csv-zoho-importer/
 |   |   |   |-- mission-006-preview-transformations.md
 |   |   |   |-- mission-007-complete.md
 |   |   |   |-- mission-007-import-2-phases-rollback.md
+|   |   |   |-- mission-008-dashboard-distribution.md
 |   |   |   +-- TEMPLATE-MISSION.md
 |   |   |-- base-context.md
 |   |   +-- README.md
