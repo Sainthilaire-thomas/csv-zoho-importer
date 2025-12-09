@@ -1,6 +1,6 @@
 ﻿# Structure du projet - csv-zoho-importer
 
-*Genere le 2025-12-08 07:36:47*
+*Genere le 2025-12-09 07:54:21*
 ```
 csv-zoho-importer/
 |-- .vscode/
@@ -17,6 +17,8 @@ csv-zoho-importer/
 |   |   |   +-- page.tsx
 |   |   |-- import/
 |   |   |   |-- import-page-client.tsx
+|   |   |   +-- page.tsx
+|   |   |-- pdf-config/
 |   |   |   +-- page.tsx
 |   |   |-- settings/
 |   |   |   |-- rules/
@@ -36,9 +38,13 @@ csv-zoho-importer/
 |   |   |   +-- route.ts
 |   |   |-- rules/
 |   |   +-- zoho/
+|   |       |-- async-export/
+|   |       |   +-- route.ts
 |   |       |-- columns/
 |   |       |   +-- route.ts
 |   |       |-- dashboard-embed/
+|   |       |   +-- route.ts
+|   |       |-- dashboard-pdf/
 |   |       |   +-- route.ts
 |   |       |-- data/
 |   |       |   +-- route.ts
@@ -48,11 +54,15 @@ csv-zoho-importer/
 |   |       |   +-- route.ts
 |   |       |-- import/
 |   |       |   +-- route.ts
+|   |       |-- list-views/
+|   |       |   +-- route.ts
 |   |       |-- oauth/
 |   |       |   |-- authorize/
 |   |       |   |-- callback/
 |   |       |   |-- disconnect/
 |   |       |   +-- status/
+|   |       |-- sql-query/
+|   |       |   +-- route.ts
 |   |       |-- tables/
 |   |       |   +-- route.ts
 |   |       |-- test-private-url/
@@ -184,6 +194,11 @@ csv-zoho-importer/
 |   |       |-- encryption.ts
 |   |       |-- index.ts
 |   |       +-- types.ts
+|   |-- pdf/
+|   |   |-- templates/
+|   |   |   +-- bilan-pqs.tsx
+|   |   |-- config.ts
+|   |   +-- types.ts
 |   +-- utils/
 |-- public/
 |   |-- file.svg
