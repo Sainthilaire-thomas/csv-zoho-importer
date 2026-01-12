@@ -701,24 +701,28 @@ function AnomalyItem({ anomaly }: { anomaly: Anomaly }) {
 
 function AnomalyBadge({ type }: { type: AnomalyType }) {
   const labels: Record<AnomalyType, string> = {
-    value_different: 'Différent',
-    value_missing: 'Manquant',
-    row_missing: 'Absent',
-    date_inverted: 'Date inversée',
-    truncated: 'Tronqué',
-    rounded: 'Arrondi',
-    encoding_issue: 'Encodage',
-  };
+  value_different: 'Différent',
+  value_missing: 'Manquant',
+  row_missing: 'Absent',
+  date_inverted: 'Date inversée',
+  datetime_truncated: 'Heure ignorée',    // ← AJOUTER
+  spaces_trimmed: 'Espaces modifiés',      // ← AJOUTER
+  truncated: 'Tronqué',
+  rounded: 'Arrondi',
+  encoding_issue: 'Encodage',
+};
 
-  const colors: Record<AnomalyType, string> = {
-    value_different: 'bg-red-200 text-red-800 dark:bg-red-800 dark:text-red-200',
-    value_missing: 'bg-red-200 text-red-800 dark:bg-red-800 dark:text-red-200',
-    row_missing: 'bg-red-200 text-red-800 dark:bg-red-800 dark:text-red-200',
-    date_inverted: 'bg-orange-200 text-orange-800 dark:bg-orange-800 dark:text-orange-200',
-    truncated: 'bg-yellow-200 text-yellow-800 dark:bg-yellow-800 dark:text-yellow-200',
-    rounded: 'bg-yellow-200 text-yellow-800 dark:bg-yellow-800 dark:text-yellow-200',
-    encoding_issue: 'bg-purple-200 text-purple-800 dark:bg-purple-800 dark:text-purple-200',
-  };
+const colors: Record<AnomalyType, string> = {
+  value_different: 'bg-red-200 text-red-800 dark:bg-red-800 dark:text-red-200',
+  value_missing: 'bg-red-200 text-red-800 dark:bg-red-800 dark:text-red-200',
+  row_missing: 'bg-red-200 text-red-800 dark:bg-red-800 dark:text-red-200',
+  date_inverted: 'bg-orange-200 text-orange-800 dark:bg-orange-800 dark:text-orange-200',
+  datetime_truncated: 'bg-blue-200 text-blue-800 dark:bg-blue-800 dark:text-blue-200',    // ← AJOUTER
+  spaces_trimmed: 'bg-blue-200 text-blue-800 dark:bg-blue-800 dark:text-blue-200',        // ← AJOUTER
+  truncated: 'bg-yellow-200 text-yellow-800 dark:bg-yellow-800 dark:text-yellow-200',
+  rounded: 'bg-yellow-200 text-yellow-800 dark:bg-yellow-800 dark:text-yellow-200',
+  encoding_issue: 'bg-purple-200 text-purple-800 dark:bg-purple-800 dark:text-purple-200',
+};
 
   return (
     <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${colors[type]}`}>
