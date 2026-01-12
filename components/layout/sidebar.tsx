@@ -1,16 +1,15 @@
 // components/layout/sidebar.tsx
-
 'use client';
-
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Upload, History, Settings,BeakerIcon } from 'lucide-react';
+import { Upload, History, Settings, BeakerIcon, FileText } from 'lucide-react';
 
 const navigation = [
   { name: 'Import', href: '/import', icon: Upload },
   { name: 'Historique', href: '/history', icon: History },
   { name: 'Paramètres', href: '/settings', icon: Settings },
-  { name: 'Test Dashboard', href: '/dashboard-test', icon: BeakerIcon }
+  { name: 'Test Dashboard', href: '/dashboard-test', icon: BeakerIcon },
+  { name: 'PDF Config', href: '/pdf-config', icon: FileText },
 ];
 
 export function Sidebar() {
@@ -24,7 +23,7 @@ export function Sidebar() {
         </h1>
         <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Analytics Importer</p>
       </div>
-      
+
       <nav className="flex-1 p-4 space-y-1">
         {navigation.map((item) => {
           const isActive = pathname.startsWith(item.href);
@@ -44,7 +43,7 @@ export function Sidebar() {
           );
         })}
       </nav>
-      
+
       <div className="p-4 border-t border-gray-200 dark:border-gray-700">
         <div className="text-xs text-gray-400 dark:text-gray-500">
           Version 0.1.0
