@@ -342,25 +342,28 @@ function ComparisonTable({ rows, matchingColumn }: { rows: ComparedRow[]; matchi
 function AnomalyBadge({ type }: { type?: AnomalyType }) {
   if (!type) return null;
 
-  const labels: Record<AnomalyType, string> = {
-    value_different: 'Différent',
-    value_missing: 'Manquant',
-    row_missing: 'Ligne absente',
-    date_inverted: 'Date inversée',
-    truncated: 'Tronqué',
-    rounded: 'Arrondi',
-    encoding_issue: 'Encodage',
-  };
-
-  const colors: Record<AnomalyType, string> = {
-    value_different: 'bg-red-100 text-red-700',
-    value_missing: 'bg-red-100 text-red-700',
-    row_missing: 'bg-red-100 text-red-700',
-    date_inverted: 'bg-orange-100 text-orange-700',
-    truncated: 'bg-yellow-100 text-yellow-700',
-    rounded: 'bg-yellow-100 text-yellow-700',
-    encoding_issue: 'bg-purple-100 text-purple-700',
-  };
+ const labels: Record<AnomalyType, string> = {
+  value_different: 'Différent',
+  value_missing: 'Manquant',
+  row_missing: 'Ligne absente',
+  date_inverted: 'Date inversée',
+  datetime_truncated: 'Heure ignorée',
+  spaces_trimmed: 'Espaces modifiés',
+  truncated: 'Tronqué',
+  rounded: 'Arrondi',
+  encoding_issue: 'Encodage',
+};
+const colors: Record<AnomalyType, string> = {
+  value_different: 'bg-red-100 text-red-700',
+  value_missing: 'bg-red-100 text-red-700',
+  row_missing: 'bg-red-100 text-red-700',
+  date_inverted: 'bg-orange-100 text-orange-700',
+  datetime_truncated: 'bg-blue-100 text-blue-700',
+  spaces_trimmed: 'bg-blue-100 text-blue-700',
+  truncated: 'bg-yellow-100 text-yellow-700',
+  rounded: 'bg-yellow-100 text-yellow-700',
+  encoding_issue: 'bg-purple-100 text-purple-700',
+};
 
   return (
     <span className={`text-[10px] px-1.5 py-0.5 rounded ${colors[type]}`}>
