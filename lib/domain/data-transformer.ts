@@ -1,6 +1,5 @@
 // ============================================================================
 // CHEMIN DESTINATION : lib/domain/data-transformer.ts
-// ACTION : CRÉER ce nouveau fichier
 // ============================================================================
 
 /**
@@ -10,7 +9,7 @@
  * Principe : Transformations EXPLICITES - l'utilisateur voit ce qui sera modifié
  */
 
-import type { ResolvableIssue, DateFormatOption } from '@/lib/infrastructure/zoho/types';
+import type { ResolvableIssue, DateFormatOption, ColumnMapping } from '@/lib/infrastructure/zoho/types';
 
 // ============================================================================
 // TYPES
@@ -147,11 +146,47 @@ export function formatDateHuman(
 }
 
 // ============================================================================
-// FONCTIONS DE TRANSFORMATION
+// FONCTIONS DE TRANSFORMATION UNITAIRES
 // ============================================================================
 
 /**
- * Transforme une valeur selon le type de transformation
+ * Applique une transformation spécifique à une valeur
+ */
+export function applyTransformation(value: string, transformType: string | undefined): string {
+  if (!value || value.trim() === '') return '';
+  
+  switch (transformType) {
+    case 'date_format':
+      // Simuler conversion DD/MM/YYYY → YYYY-MM-DD
+      const dateMatch = value.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+      if (dateMatch) {
+        return `${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}`;
+      }
+      return value;
+      
+    case 'number_format':
+      // Simuler conversion 1 234,56 → 1234.56
+      return value.replace(/\s/g, '').replace(',', '.');
+      
+    case 'duration_format':
+      // Simuler conversion 9:30 → 09:30:00
+      const durationMatch = value.match(/^(\d{1,2}):(\d{2})$/);
+      if (durationMatch) {
+        const hours = durationMatch[1].padStart(2, '0');
+        return `${hours}:${durationMatch[2]}:00`;
+      }
+      return value;
+      
+    case 'trim':
+      return value.trim();
+      
+    default:
+      return value;
+  }
+}
+
+/**
+ * Transforme une valeur selon le type de transformation (pour DataTransformer class)
  */
 function transformValue(
   value: string,
@@ -203,6 +238,52 @@ function transformValue(
     default:
       return { success: true, value: trimmed };
   }
+}
+
+// ============================================================================
+// FONCTION PRINCIPALE - APPLIQUE TOUTES LES TRANSFORMATIONS
+// ============================================================================
+
+/**
+ * Applique TOUTES les transformations aux données
+ * Cette fonction est la SOURCE DE VÉRITÉ utilisée pour :
+ * - L'affichage preview (StepTransformPreview)
+ * - L'envoi à Zoho (executeTestImport, handleConfirmFullImport)
+ * 
+ * @param data - Données brutes du fichier
+ * @param matchedColumns - Colonnes mappées avec leurs transformations
+ * @returns Données transformées prêtes pour Zoho
+ */
+export function applyAllTransformations(
+  data: Record<string, unknown>[],
+  matchedColumns?: ColumnMapping[]
+): Record<string, unknown>[] {
+  return data.map(row => {
+    const newRow: Record<string, unknown> = {};
+    
+    for (const [key, value] of Object.entries(row)) {
+      if (typeof value === 'string') {
+        // 1. TOUJOURS nettoyer : remplacer \r\n par espace + trim
+        let cleaned = value.replace(/[\r\n]+/g, ' ').trim();
+        
+        // 2. Appliquer transformation spécifique si définie dans le mapping
+        if (matchedColumns) {
+          const colMapping = matchedColumns.find(c => c.fileColumn === key);
+          if (colMapping?.transformNeeded && colMapping.transformNeeded !== 'none') {
+            cleaned = applyTransformation(cleaned, colMapping.transformNeeded);
+          }
+        }
+        
+        newRow[key] = cleaned;
+      } else if (value === null || value === undefined) {
+        newRow[key] = '';
+      } else {
+        newRow[key] = value;
+      }
+    }
+    
+    return newRow;
+  });
 }
 
 // ============================================================================

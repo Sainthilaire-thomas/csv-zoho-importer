@@ -14,6 +14,7 @@ import { StepTransformPreview } from './step-transform-preview';
 import { verifyImport, type SentRow, type VerificationResult, EMPTY_VERIFICATION_RESULT } from '@/lib/domain/verification';
 import { StepTestImport } from './step-test-import';
 import { StepTestResult } from './step-test-result';
+import { applyAllTransformations } from '@/lib/domain/data-transformer';
 import { MatchingColumnSelector } from './matching-column-selector';
 import { 
   findBestMatchingColumnEnhanced, 
@@ -178,6 +179,24 @@ const testMatchingValuesRef = useRef<string[]>([]);
     setIssuesResolved(false);
   }, [setTable]);
 
+  // ==========================================================================
+  // NOUVEAU : Helper pour extraire les types de colonnes du schema Zoho
+  // ==========================================================================
+  const getColumnTypesFromSchema = useCallback((): Record<string, string> | undefined => {
+    if (!zohoSchema?.columns || zohoSchema.columns.length === 0) {
+      console.log('[ColumnTypes] Pas de schema Zoho disponible');
+      return undefined;
+    }
+    
+    const types: Record<string, string> = {};
+    for (const col of zohoSchema.columns) {
+      types[col.columnName] = col.dataType;
+    }
+    
+    console.log('[ColumnTypes] Types extraits du schema Zoho:', types);
+    return Object.keys(types).length > 0 ? types : undefined;
+  }, [zohoSchema]);
+
   // Recuperer le schema Zoho d une table
   const fetchZohoSchema = useCallback(async (workspaceId: string, viewId: string, viewName: string): Promise<ZohoTableSchema | null> => {
     try {
@@ -225,7 +244,7 @@ const testMatchingValuesRef = useRef<string[]>([]);
       console.log('Debut du parsing...');
       const parseResult = await parseFile(state.config.file);
       console.log('Parsing termine, lignes:', parseResult.totalRows);
-      setParsedData(parseResult.data);
+      
       updateProgress({ phase: 'parsing', current: 100, total: 100, percentage: 20 });
 
       // Phase 2: Recuperation du schema Zoho
@@ -235,7 +254,9 @@ const testMatchingValuesRef = useRef<string[]>([]);
       setZohoSchema(schema);
 
       // Phase 3: Validation du schema (correspondance colonnes)
-      if (schema && schema.columns.length > 0) {
+let schemaResult: SchemaValidationResult | null = null;
+
+if (schema && schema.columns.length > 0) {
         updateProgress({ phase: 'validating', current: 40, total: 100, percentage: 50 });
         console.log('Validation du schema...');
 
@@ -245,7 +266,7 @@ const testMatchingValuesRef = useRef<string[]>([]);
           headers.map(h => String((row as Record<string, unknown>)[h] ?? ''))
         );
 
-        const schemaResult = validateSchema({
+       schemaResult = validateSchema({
           fileHeaders: headers,
           sampleData,
           zohoSchema: schema,
@@ -268,6 +289,20 @@ const testMatchingValuesRef = useRef<string[]>([]);
         setSchemaValidation(null);
       }
 
+       // ========================================================================
+      // Appliquer les transformations aux données parsées
+      // C'est la SOURCE DE VÉRITÉ - ces données seront utilisées pour preview ET envoi à Zoho
+      // ========================================================================
+      const transformedData = applyAllTransformations(
+        parseResult.data as Record<string, unknown>[],
+        schemaResult?.matchedColumns
+      );
+      console.log('[Transformation] Données transformées:', transformedData.length, 'lignes');
+      
+      // Stocker les données TRANSFORMÉES (pas les données brutes)
+      setParsedData(transformedData);
+
+     
       // Phase 4: Validation des donnees (regles metier)
       updateProgress({ phase: 'validating', current: 60, total: 100, percentage: 70 });
       const validationConfig: TableValidationConfig = {
@@ -277,7 +312,7 @@ const testMatchingValuesRef = useRef<string[]>([]);
       };
 
       console.log('Debut de la validation des donnees...');
-      const result = await validate(parseResult.data, validationConfig);
+      const result = await validate(transformedData, validationConfig);
       console.log('Validation terminee:', result);
 
       setValidationResult(result);
@@ -287,7 +322,7 @@ const testMatchingValuesRef = useRef<string[]>([]);
         error instanceof Error ? error.message : 'Erreur lors de la validation'
       );
     }
-  }, [state.config.file, state.config.tableId, state.config.tableName, selectedWorkspaceId, startValidation, updateProgress, parseFile, fetchZohoSchema, validate, setValidationResult, setValidationError]);
+  }, [state.config.file, state.config.tableId, state.config.tableName, selectedWorkspaceId, startValidation, updateProgress, parseFile, fetchZohoSchema, validate, setValidationResult, setValidationError, selectedProfile]);
 
   // ==========================================================================
   // Fonction pour sauvegarder ou mettre a jour le profil
@@ -519,6 +554,7 @@ const testMatchingValuesRef = useRef<string[]>([]);
         fileName: state.config.file?.name,
         totalRows: validData.length,
         matchingColumns: matchingColumns.length > 0 ? matchingColumns : undefined,
+        columnTypes: getColumnTypesFromSchema(),  // ← NOUVEAU : Passer les types Zoho
       }),
     });
 
@@ -608,7 +644,8 @@ const testMatchingValuesRef = useRef<string[]>([]);
   updateProgress, 
   setImportSuccess, 
   setImportError,
-  matchingColumns, // ← AJOUTER à la liste des dépendances
+  matchingColumns,
+  getColumnTypesFromSchema,  // ← NOUVEAU : Ajouter à la liste des dépendances
 ]);
   // ==========================================================================
   // Handlers pour StepProfile
@@ -746,7 +783,7 @@ const executeTestImport = useCallback(async (): Promise<{ success: boolean; erro
     // Convertir en CSV
     const csvData = Papa.unparse(sampleData);
 
-    // Envoyer à Zoho
+    // Envoyer à Zoho avec les types de colonnes
     const response = await fetch('/api/zoho/import', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -759,6 +796,7 @@ const executeTestImport = useCallback(async (): Promise<{ success: boolean; erro
         fileName: state.config.file?.name,
         totalRows: sampleData.length,
         matchingColumns: matchingColumns.length > 0 ? matchingColumns : undefined,
+        columnTypes: getColumnTypesFromSchema(),  // ← NOUVEAU : Passer les types Zoho
       }),
     });
 
@@ -775,7 +813,7 @@ const executeTestImport = useCallback(async (): Promise<{ success: boolean; erro
       error: error instanceof Error ? error.message : 'Erreur inconnue' 
     };
   }
-}, [parsedData, state.config, state.validation, testSampleSize, verificationColumn, selectedWorkspaceId, matchingColumns, selectedProfile, zohoSchema]);
+}, [parsedData, state.config, state.validation, testSampleSize, verificationColumn, selectedWorkspaceId, matchingColumns, selectedProfile, zohoSchema, getColumnTypesFromSchema]);
 
 /**
  * Exécute la vérification après import test
@@ -928,6 +966,7 @@ const handleConfirmFullImport = useCallback(async () => {
         fileName: state.config.file?.name,
         totalRows: remainingData.length,
         matchingColumns: matchingColumns.length > 0 ? matchingColumns : undefined,
+        columnTypes: getColumnTypesFromSchema(),  // ← NOUVEAU : Passer les types Zoho
       }),
     });
 
@@ -991,6 +1030,7 @@ verificationColumnRef.current = null;
   updateProgress,
   setImportSuccess,
   setImportError,
+  getColumnTypesFromSchema,  // ← NOUVEAU : Ajouter à la liste des dépendances
 ]);
 
 /**
@@ -1019,9 +1059,11 @@ const handleForceImport = useCallback(() => {
 
       case 'profiling':
         if (!parsedData && state.config.file) {
-          parseFile(state.config.file).then(result => {
-            setParsedData(result.data);
-          });
+         parseFile(state.config.file).then(result => {
+  // Appliquer les transformations de base même sans schéma
+  const transformed = applyAllTransformations(result.data as Record<string, unknown>[]);
+  setParsedData(transformed);
+});
           return <div className="text-center p-8">Analyse du fichier en cours...</div>;
         }
         

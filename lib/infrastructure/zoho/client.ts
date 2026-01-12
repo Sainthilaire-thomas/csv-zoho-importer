@@ -452,6 +452,7 @@ export class ZohoAnalyticsClient {
     autoIdentify = true,
     dateFormat = 'dd/MM/yyyy',
     matchingColumns,
+    columnTypes,
   } = params;
 
   // Nettoyer les données CSV
@@ -463,11 +464,21 @@ export class ZohoAnalyticsClient {
   console.log('[Zoho Import] Headers:', cleanedData.split('\n')[0]);
 
   // Construire le CONFIG JSON
-  const config: Record<string, any> = {
-    importType: importType.toLowerCase(), // append, truncateadd, updateadd, etc.
-    fileType: 'csv',
-    autoIdentify: autoIdentify,
-  };
+ // Construire le CONFIG JSON
+const useAutoIdentify = columnTypes ? false : autoIdentify;
+
+const config: Record<string, any> = {
+  importType: importType.toLowerCase(),
+  fileType: 'csv',
+  autoIdentify: useAutoIdentify,
+};
+
+// Si autoIdentify est désactivé, on doit spécifier les paramètres CSV manuellement
+if (!useAutoIdentify) {
+  config.delimiter = 0;    // 0 = COMMA
+  config.quoted = 2;       // 2 = DOUBLE QUOTE
+  console.log('[Zoho Import] autoIdentify=false, using manual CSV config');
+}
 
   if (dateFormat) {
     config.dateFormat = dateFormat;
@@ -476,6 +487,10 @@ export class ZohoAnalyticsClient {
   if (matchingColumns && matchingColumns.length > 0) {
     config.matchingColumns = matchingColumns;
   }
+
+  if (columnTypes) {
+  console.log('[Zoho Import] Using explicit column types - autoIdentify disabled');
+}
 
   // Encoder le CONFIG pour le query string
   const configEncoded = encodeURIComponent(JSON.stringify(config));

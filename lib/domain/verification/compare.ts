@@ -362,10 +362,11 @@ function detectAnomalyType(sentValue: string, receivedValue: string): AnomalyTyp
   if (normalizedSent === normalizedReceived) return undefined;
   if (sentValue && !receivedValue) return 'value_missing';
   if (isDateInverted(sentValue, receivedValue)) return 'date_inverted';
+  if (isDatetimeTruncatedToDate(sentValue, receivedValue)) return 'datetime_truncated';
   if (isTruncated(sentValue, receivedValue)) return 'truncated';
   if (isRounded(sentValue, receivedValue)) return 'rounded';
   if (hasEncodingIssue(sentValue, receivedValue)) return 'encoding_issue';
-  
+if (isSpacesTrimmed(sentValue, receivedValue)) return 'spaces_trimmed';
   return 'value_different';
 }
 
@@ -397,6 +398,11 @@ function detectAnomaly(
     return createAnomaly('value_missing', rowIndex, column, sentValue, receivedValue);
   }
 
+  // Détecter perte d'heure (datetime → date)
+  if (isDatetimeTruncatedToDate(sentValue, receivedValue)) {
+    return createAnomaly('datetime_truncated', rowIndex, column, sentValue, receivedValue);
+  }
+
   // Détecter date inversée (ex: 05/03/2025 vs 03/05/2025)
   if (isDateInverted(sentValue, receivedValue)) {
     return createAnomaly('date_inverted', rowIndex, column, sentValue, receivedValue);
@@ -416,6 +422,11 @@ function detectAnomaly(
   if (hasEncodingIssue(sentValue, receivedValue)) {
     return createAnomaly('encoding_issue', rowIndex, column, sentValue, receivedValue);
   }
+  
+  // Détecter espaces supprimés
+if (isSpacesTrimmed(sentValue, receivedValue)) {
+  return createAnomaly('spaces_trimmed', rowIndex, column, sentValue, receivedValue);
+}
 
   // Valeur différente (cas général)
   return createAnomaly('value_different', rowIndex, column, sentValue, receivedValue);
@@ -448,6 +459,45 @@ function normalizeValue(value: unknown): string {
   }
   
   return str.toLowerCase();
+}
+
+/**
+ * Détecte si l'heure a été perdue (datetime → date)
+ * Ex: "07/01/26 07:04:34" → "07/01/26 00:00:00"
+ */
+function isDatetimeTruncatedToDate(sent: string, received: string): boolean {
+  // Pattern : date avec heure
+  const datetimePattern = /^(\d{2}\/\d{2}\/\d{2,4})\s+(\d{2}:\d{2}:\d{2})$/;
+  
+  const sentMatch = sent.match(datetimePattern);
+  const receivedMatch = received.match(datetimePattern);
+  
+  if (sentMatch && receivedMatch) {
+    const sentDate = sentMatch[1];
+    const sentTime = sentMatch[2];
+    const receivedDate = receivedMatch[1];
+    const receivedTime = receivedMatch[2];
+    
+    // Même date mais heure reçue = 00:00:00 (heure perdue)
+    if (sentDate === receivedDate && sentTime !== '00:00:00' && receivedTime === '00:00:00') {
+      return true;
+    }
+  }
+  
+  return false;
+}
+
+/**
+ * Détecte si la seule différence est les espaces autour des virgules/ponctuations
+ * Ex: "QS, RS, RC" → "QS,RS,RC"
+ */
+function isSpacesTrimmed(sent: string, received: string): boolean {
+  // Normaliser les espaces autour des virgules et ponctuations
+  const normalizedSent = sent.replace(/\s*([,;:])\s*/g, '$1').trim();
+  const normalizedReceived = received.replace(/\s*([,;:])\s*/g, '$1').trim();
+  
+  // Si égaux après normalisation des espaces, c'est bien ce cas
+  return normalizedSent.toLowerCase() === normalizedReceived.toLowerCase() && sent !== received;
 }
 
 /**

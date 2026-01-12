@@ -229,11 +229,12 @@ export interface ZohoImportParams {
   viewId: string;
   viewName: string;
   importType: ZohoImportType;
-  data: string; // CSV formaté
+  data: string;
   autoIdentify?: boolean;
   dateFormat?: string;
-  matchingColumns?: string[]; // Pour UPDATEADD et DELETEUPSERT
+  matchingColumns?: string[];
   skipFirstRow?: boolean;
+  columnTypes?: Record<string, string>;  // ← AJOUTER : { "Informations": "PLAIN", "Date": "DATE", ... }
 }
 
 

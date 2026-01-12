@@ -37,6 +37,7 @@ interface ImportRequestBody {
   matchingColumns?: string[];
   fileName?: string;
   totalRows?: number;
+  columnTypes?: Record<string, string>;  // ← AJOUTER
 }
 
 export async function POST(request: NextRequest) {
@@ -66,6 +67,7 @@ export async function POST(request: NextRequest) {
       matchingColumns,
       fileName,
       totalRows,
+      columnTypes,
     } = body;
     
     // Stocker temporairement pour traitement
@@ -93,16 +95,17 @@ export async function POST(request: NextRequest) {
     const zohoImportType = getZohoImportType(importMode);
     
     // 6. Effectuer l'import
- const result = await client.importData({
-      workspaceId,
-      viewId: tableId,
-      viewName: tableName,  // <-- AJOUTER
-      importType: zohoImportType,
-      data: csvData,
-      autoIdentify: true,
-      dateFormat: 'dd/MM/yyyy',
-      matchingColumns,
-    });
+const result = await client.importData({
+  workspaceId,
+  viewId: tableId,
+  viewName: tableName,
+  importType: zohoImportType,
+  data: csvData,
+  autoIdentify: !columnTypes,  // ← MODIFIER : false si on a les types
+  dateFormat: 'dd/MM/yyyy',
+  matchingColumns,
+  columnTypes,  // ← AJOUTER
+});
     
     const duration = Date.now() - startTime;
     

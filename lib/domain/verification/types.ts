@@ -79,6 +79,8 @@ export type AnomalyType =
   | 'value_missing'     // Valeur présente dans source mais vide dans Zoho
   | 'row_missing'       // Ligne non trouvée dans Zoho
   | 'date_inverted'     // Jour/mois inversés (05/03 → 03/05)
+  | 'datetime_truncated' // Heure perdue (datetime → date)
+  | 'spaces_trimmed'    // Espaces supprimés par Zoho  ← NOUVEAU
   | 'truncated'         // Texte tronqué
   | 'rounded'           // Nombre arrondi
   | 'encoding_issue';   // Problème d'encodage (accents)
@@ -166,7 +168,9 @@ export function getAnomalyLevel(type: AnomalyType): AnomalyLevel {
     case 'row_missing':
     case 'date_inverted':
       return 'critical';
+    case 'datetime_truncated':  // ← NOUVEAU
     case 'truncated':
+      case 'spaces_trimmed': 
     case 'rounded':
     case 'encoding_issue':
       return 'warning';
@@ -188,10 +192,14 @@ export function getAnomalyMessage(type: AnomalyType, column: string): string {
       return 'Ligne non trouvée dans Zoho';
     case 'date_inverted':
       return `Date inversée (jour/mois) pour "${column}"`;
+    case 'datetime_truncated':  // ← NOUVEAU
+      return `Heure ignorée pour "${column}" (le fichier contient une date+heure, mais la colonne Zoho est de type DATE sans heure)`;
     case 'truncated':
       return `Texte tronqué pour "${column}"`;
     case 'rounded':
       return `Nombre arrondi pour "${column}"`;
+      case 'spaces_trimmed':
+  return `Espaces modifiés pour "${column}" (Zoho supprime les espaces autour des virgules/ponctuations)`;
     case 'encoding_issue':
       return `Problème d'encodage pour "${column}"`;
     default:
