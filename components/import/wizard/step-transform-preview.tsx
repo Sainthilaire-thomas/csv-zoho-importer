@@ -30,6 +30,7 @@ interface StepTransformPreviewProps {
   matchedColumns: ColumnMapping[];
   parsedData: Record<string, unknown>[];
   totalRows: number;
+  zohoReferenceRow?: Record<string, unknown> | null;
   onBack: () => void;
   onConfirm: () => void;
 }
@@ -124,6 +125,7 @@ export function StepTransformPreview({
   matchedColumns,
   parsedData,
   totalRows,
+  zohoReferenceRow,
   onBack,
   onConfirm,
 }: StepTransformPreviewProps) {
@@ -230,7 +232,7 @@ export function StepTransformPreview({
                     <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 w-10">
                       #
                     </th>
-                    {displayColumns.map((col) => (
+                   {displayColumns.map((col) => (
                       <th key={col.fileColumn} className="px-3 py-2 text-left min-w-[200px]">
                         <div className="flex flex-col gap-1">
                           <span className="font-medium text-gray-900 dark:text-gray-100">
@@ -244,6 +246,15 @@ export function StepTransformPreview({
                               </span>
                             )}
                           </div>
+                         {/* Exemple Zoho existant */}
+                          {zohoReferenceRow && col.zohoColumn && zohoReferenceRow[col.zohoColumn] !== undefined && (
+                            <div className="flex items-center gap-1 text-xs text-purple-600 dark:text-purple-400">
+                              <span>📋</span>
+                              <span className="font-mono truncate max-w-[180px]" title={String(zohoReferenceRow[col.zohoColumn])}>
+                                {String(zohoReferenceRow[col.zohoColumn])}
+                              </span>
+                            </div>
+                          )}
                         </div>
                       </th>
                     ))}

@@ -95,6 +95,7 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
   const [parsedData, setParsedData] = useState<Record<string, unknown>[] | null>(null);
   const [schemaValidation, setSchemaValidation] = useState<SchemaValidationResult | null>(null);
   const [zohoSchema, setZohoSchema] = useState<ZohoTableSchema | null>(null);
+  const [zohoReferenceRow, setZohoReferenceRow] = useState<Record<string, unknown> | null>(null);
 
   // Issues resolues par l utilisateur
   const [resolvedIssues, setResolvedIssues] = useState<ResolvableIssue[] | null>(null);
@@ -252,6 +253,24 @@ const testMatchingValuesRef = useRef<string[]>([]);
       console.log('Recuperation du schema Zoho...');
       const schema = await fetchZohoSchema(selectedWorkspaceId, state.config.tableId, state.config.tableName);
       setZohoSchema(schema);
+
+      // Phase 2b: Récupération d'une ligne de référence Zoho (pour preview)
+      try {
+        const refResponse = await fetch(
+          `/api/zoho/data?workspaceId=${selectedWorkspaceId}&viewId=${state.config.tableId}&limit=1`
+        );
+        const refData = await refResponse.json();
+        if (refData.success && refData.data && refData.data.length > 0) {
+          setZohoReferenceRow(refData.data[0]);
+          console.log('[Reference] Ligne Zoho de référence récupérée');
+        } else {
+          setZohoReferenceRow(null);
+          console.log('[Reference] Aucune donnée existante dans la table');
+        }
+      } catch (refError) {
+        console.warn('[Reference] Erreur récupération ligne de référence:', refError);
+        setZohoReferenceRow(null);
+      }
 
       // Phase 3: Validation du schema (correspondance colonnes)
 let schemaResult: SchemaValidationResult | null = null;
@@ -1134,6 +1153,7 @@ const handleForceImport = useCallback(() => {
             matchedColumns={schemaValidation?.matchedColumns || []}
             parsedData={parsedData || []}
             totalRows={state.validation?.totalRows || 0}
+            zohoReferenceRow={zohoReferenceRow}
             onBack={() => goToStep('configuring')}
             onConfirm={() => goToStep('reviewing')}
           />
