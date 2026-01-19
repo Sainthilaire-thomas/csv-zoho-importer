@@ -435,14 +435,63 @@ if (isSpacesTrimmed(sentValue, receivedValue)) {
 // ==================== HELPERS DE DÉTECTION ====================
 
 /**
+ * Mapping des mois en anglais vers numéro
+ */
+const MONTH_MAP: Record<string, string> = {
+  Jan: '01', Feb: '02', Mar: '03', Apr: '04', May: '05', Jun: '06',
+  Jul: '07', Aug: '08', Sep: '09', Oct: '10', Nov: '11', Dec: '12',
+};
+
+/**
+ * Tente de parser une chaîne comme date et retourne un format canonique YYYY-MM-DD
+ * Gère plusieurs formats : ISO, Zoho, FR
+ */
+function tryParseDateToCanonical(str: string): string | null {
+  if (!str || typeof str !== 'string') return null;
+  
+  const trimmed = str.trim();
+  
+  // Format ISO : 2025-04-04 ou 2025-04-04T00:00:00
+  const isoMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (isoMatch) {
+    return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+  }
+  
+  // Format Zoho : "04 Apr, 2025 00:00:00" ou "04 Apr, 2025"
+  const zohoMatch = trimmed.match(/^(\d{2}) (\w{3}), (\d{4})/);
+  if (zohoMatch) {
+    const day = zohoMatch[1];
+    const month = MONTH_MAP[zohoMatch[2]];
+    const year = zohoMatch[3];
+    if (month) {
+      return `${year}-${month}-${day}`;
+    }
+  }
+  
+  // Format FR : 04/04/2025
+  const frMatch = trimmed.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (frMatch) {
+    return `${frMatch[3]}-${frMatch[2]}-${frMatch[1]}`;
+  }
+  
+  return null;
+}
+
+/**
  * Normalise une valeur pour comparaison
  */
 function normalizeValue(value: unknown): string {
   if (value === null || value === undefined) return '';
-  
+
   let str = String(value).trim();
-  
-  // Normaliser les nombres : enlever les .0 inutiles (50.0 → 50)
+
+  // 1. NOUVEAU : Essayer de parser comme date
+  const parsedDate = tryParseDateToCanonical(str);
+  if (parsedDate) {
+    return parsedDate;
+  }
+
+  // 2. Normaliser les nombres : enlever les .0 inutiles (50.0 → 50)
   // et gérer les formats avec virgule (50,0 → 50)
   const numMatch = str.match(/^-?\d+([.,]\d+)?$/);
   if (numMatch) {
@@ -457,7 +506,7 @@ function normalizeValue(value: unknown): string {
       }
     }
   }
-  
+
   return str.toLowerCase();
 }
 
