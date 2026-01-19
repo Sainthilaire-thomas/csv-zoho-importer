@@ -45,8 +45,11 @@ export interface ImportProgress {
   current: number;
   total: number;
   percentage: number;
+  chunk?: {
+    current: number;
+    total: number;
+  };
 }
-
 export interface ImportResult {
   success: boolean;
   importId: string;

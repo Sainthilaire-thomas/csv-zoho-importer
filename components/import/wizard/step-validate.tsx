@@ -4,7 +4,7 @@
 import { useEffect, useRef } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
-import { Loader2, FileSearch, CheckCircle2 } from 'lucide-react';
+import { Loader2, FileSearch, CheckCircle2, Upload } from 'lucide-react';
 import type { ImportProgress } from '@/types';
 
 interface StepValidateProps {
@@ -28,24 +28,49 @@ export function StepValidate({
   }, [onValidationStart]);
 
   const percentage = progress?.percentage ?? 0;
+  const isFullImporting = progress?.phase === 'full-importing';
+  const chunk = progress?.chunk;
 
   return (
     <Card variant="bordered" padding="lg">
       <CardContent>
         <div className="flex flex-col items-center justify-center py-12">
           <div className="relative mb-8">
-            <div className="absolute inset-0 bg-blue-500/20 rounded-full animate-ping" />
-            <div className="relative p-6 bg-blue-100 dark:bg-blue-900/50 rounded-full">
-              <FileSearch className="h-12 w-12 text-blue-600 dark:text-blue-400" />
+            <div className={`absolute inset-0 ${isFullImporting ? 'bg-green-500/20' : 'bg-blue-500/20'} rounded-full animate-ping`} />
+            <div className={`relative p-6 ${isFullImporting ? 'bg-green-100 dark:bg-green-900/50' : 'bg-blue-100 dark:bg-blue-900/50'} rounded-full`}>
+              {isFullImporting ? (
+                <Upload className="h-12 w-12 text-green-600 dark:text-green-400" />
+              ) : (
+                <FileSearch className="h-12 w-12 text-blue-600 dark:text-blue-400" />
+              )}
             </div>
           </div>
 
           <h3 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-2">
-            Validation en cours
+            {isFullImporting ? 'Import en cours' : 'Validation en cours'}
           </h3>
-          <p className="text-gray-500 dark:text-gray-400 mb-8 text-center">
-            Analyse du fichier <span className="font-medium">{fileName}</span>
+          
+          <p className="text-gray-500 dark:text-gray-400 mb-2 text-center">
+            {isFullImporting ? (
+              <>Import vers Zoho Analytics</>
+            ) : (
+              <>Analyse du fichier <span className="font-medium">{fileName}</span></>
+            )}
           </p>
+
+          {/* Affichage du chunk en cours */}
+          {isFullImporting && chunk && chunk.total > 1 && (
+            <p className="text-lg font-medium text-green-600 dark:text-green-400 mb-2">
+              Lot {chunk.current} / {chunk.total}
+            </p>
+          )}
+
+          {/* Affichage des lignes */}
+          {isFullImporting && progress && (
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
+              {progress.current.toLocaleString('fr-FR')} / {progress.total.toLocaleString('fr-FR')} lignes
+            </p>
+          )}
 
           <div className="w-full max-w-md mb-6">
             <Progress
@@ -57,24 +82,58 @@ export function StepValidate({
             />
           </div>
 
-          <div className="flex flex-col gap-3 text-sm">
-            <StepIndicator
-              label="Lecture du fichier"
-              status={percentage >= 20 ? 'complete' : percentage > 0 ? 'active' : 'pending'}
-            />
-            <StepIndicator
-              label="Analyse des colonnes"
-              status={percentage >= 40 ? 'complete' : percentage >= 20 ? 'active' : 'pending'}
-            />
-            <StepIndicator
-              label="Validation des donnees"
-              status={percentage >= 80 ? 'complete' : percentage >= 40 ? 'active' : 'pending'}
-            />
-            <StepIndicator
-              label="Generation du rapport"
-              status={percentage >= 100 ? 'complete' : percentage >= 80 ? 'active' : 'pending'}
-            />
-          </div>
+          {/* Indicateurs d'étapes - uniquement pour la validation */}
+          {!isFullImporting && (
+            <div className="flex flex-col gap-3 text-sm">
+              <StepIndicator
+                label="Lecture du fichier"
+                status={percentage >= 20 ? 'complete' : percentage > 0 ? 'active' : 'pending'}
+              />
+              <StepIndicator
+                label="Analyse des colonnes"
+                status={percentage >= 40 ? 'complete' : percentage >= 20 ? 'active' : 'pending'}
+              />
+              <StepIndicator
+                label="Validation des donnees"
+                status={percentage >= 80 ? 'complete' : percentage >= 40 ? 'active' : 'pending'}
+              />
+              <StepIndicator
+                label="Generation du rapport"
+                status={percentage >= 100 ? 'complete' : percentage >= 80 ? 'active' : 'pending'}
+              />
+            </div>
+          )}
+
+          {/* Indicateurs pour l'import par chunks */}
+          {isFullImporting && chunk && (
+            <div className="flex flex-col gap-3 text-sm mt-4">
+              {Array.from({ length: Math.min(chunk.total, 5) }, (_, i) => {
+                // Afficher max 5 indicateurs avec ellipsis si plus
+                const chunkNum = i + 1;
+                let status: 'pending' | 'active' | 'complete' = 'pending';
+                
+                if (chunkNum < chunk.current) {
+                  status = 'complete';
+                } else if (chunkNum === chunk.current) {
+                  status = 'active';
+                }
+
+                return (
+                  <StepIndicator
+                    key={chunkNum}
+                    label={`Lot ${chunkNum}${chunk.total > 5 && chunkNum === 5 ? ` ... ${chunk.total}` : ''}`}
+                    status={status}
+                  />
+                );
+              })}
+              {chunk.total > 5 && chunk.current > 5 && (
+                <StepIndicator
+                  label={`Lot ${chunk.current} / ${chunk.total}`}
+                  status="active"
+                />
+              )}
+            </div>
+          )}
         </div>
       </CardContent>
     </Card>

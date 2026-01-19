@@ -36,6 +36,10 @@ import type { ImportProfile, ProfileMatchResult, DetectedColumn } from '@/types/
 import Papa from 'papaparse';
 import { toast } from 'sonner';
 
+// ==================== CONSTANTES CHUNKING ====================
+const CHUNK_SIZE = 5000;  // Lignes par chunk (~ 1-2MB selon les données)
+const MAX_RETRIES = 2;    // Tentatives par chunk en cas d'erreur
+
 interface ZohoWorkspace {
   id: string;
   name: string;
@@ -935,8 +939,9 @@ const handleRollback = useCallback(async (): Promise<RollbackResult> => {
 
   return result;
 }, [selectedWorkspaceId, state.config.tableId, goToStep]);
+
 /**
- * Confirme l'import complet après test réussi
+ * Confirme l'import complet après test réussi - VERSION CHUNKING
  */
 const handleConfirmFullImport = useCallback(async () => {
   if (!parsedData || !state.config.tableId || !state.validation) return;
@@ -950,9 +955,9 @@ const handleConfirmFullImport = useCallback(async () => {
       return !state.validation!.errors.some((err) => err.line === lineNumber);
     });
 
-    // Prendre les données RESTANTES (après l'échantillon)
+    // Prendre les données RESTANTES (après l'échantillon test)
     const remainingData = validData.slice(testSampleSize);
-    
+
     if (remainingData.length === 0) {
       // Toutes les données ont déjà été importées dans le test
       setImportSuccess({
@@ -965,36 +970,103 @@ const handleConfirmFullImport = useCallback(async () => {
       return;
     }
 
-    const csvData = Papa.unparse(remainingData);
+    // ==================== CHUNKING ====================
+    const totalChunks = Math.ceil(remainingData.length / CHUNK_SIZE);
+    let totalImported = 0;
+    const startTime = Date.now();
 
-    updateProgress({
-      phase: 'full-importing',
-      current: 0,
-      total: remainingData.length,
-      percentage: 0,
-    });
+    console.log(`[Import] Démarrage import par chunks: ${remainingData.length} lignes en ${totalChunks} lot(s) de ${CHUNK_SIZE} lignes max`);
 
-    const response = await fetch('/api/zoho/import', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        workspaceId: selectedWorkspaceId,
-        tableId: state.config.tableId,
-        tableName: state.config.tableName,
-        importMode: 'append', // Toujours append pour les données restantes
-        csvData: csvData,
-        fileName: state.config.file?.name,
-        totalRows: remainingData.length,
-        matchingColumns: matchingColumns.length > 0 ? matchingColumns : undefined,
-        columnTypes: getColumnTypesFromSchema(),  // ← NOUVEAU : Passer les types Zoho
-      }),
-    });
+    for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+      const start = chunkIndex * CHUNK_SIZE;
+      const end = Math.min(start + CHUNK_SIZE, remainingData.length);
+      const chunk = remainingData.slice(start, end);
 
-    const result = await response.json();
+      // Mise à jour progression avec info chunk
+      const chunkPercentage = Math.round(((chunkIndex + 0.5) / totalChunks) * 100);
+      updateProgress({
+        phase: 'full-importing',
+        current: start + Math.floor(chunk.length / 2),
+        total: remainingData.length,
+        percentage: chunkPercentage,
+        chunk: {
+          current: chunkIndex + 1,
+          total: totalChunks,
+        },
+      });
 
-    if (!response.ok) {
-      throw new Error(result.error || "Erreur lors de l'import");
+      console.log(`[Import] Chunk ${chunkIndex + 1}/${totalChunks}: lignes ${start + 1}-${end} (${chunk.length} lignes)`);
+
+      // Convertir en CSV
+      const csvData = Papa.unparse(chunk);
+
+      // Retry loop
+      let success = false;
+      let lastError: string | null = null;
+
+      for (let retry = 0; retry <= MAX_RETRIES && !success; retry++) {
+        if (retry > 0) {
+          console.log(`[Import] Retry ${retry}/${MAX_RETRIES} pour chunk ${chunkIndex + 1}`);
+          // Backoff exponentiel : 1s, 2s
+          await new Promise(resolve => setTimeout(resolve, 1000 * retry));
+        }
+
+        try {
+          const response = await fetch('/api/zoho/import', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              workspaceId: selectedWorkspaceId,
+              tableId: state.config.tableId,
+              tableName: state.config.tableName,
+              importMode: 'append', // Toujours append pour les données restantes
+              csvData: csvData,
+              fileName: state.config.file?.name,
+              totalRows: chunk.length,
+              matchingColumns: matchingColumns.length > 0 ? matchingColumns : undefined,
+              columnTypes: getColumnTypesFromSchema(),
+            }),
+          });
+
+          const result = await response.json();
+
+          if (response.ok && result.success) {
+            success = true;
+            totalImported += chunk.length;
+            console.log(`[Import] Chunk ${chunkIndex + 1} OK: ${chunk.length} lignes importées (total: ${totalImported})`);
+          } else {
+            lastError = result.error || 'Erreur inconnue';
+            console.warn(`[Import] Chunk ${chunkIndex + 1} erreur:`, lastError);
+          }
+        } catch (error) {
+          lastError = error instanceof Error ? error.message : 'Erreur réseau';
+          console.warn(`[Import] Chunk ${chunkIndex + 1} exception:`, lastError);
+        }
+      }
+
+      if (!success) {
+        throw new Error(
+          `Échec à l'import du lot ${chunkIndex + 1}/${totalChunks} (lignes ${start + 1}-${end}): ${lastError}`
+        );
+      }
+
+      // Mise à jour progression après chunk réussi
+      const completedPercentage = Math.round(((chunkIndex + 1) / totalChunks) * 100);
+      updateProgress({
+        phase: 'full-importing',
+        current: end,
+        total: remainingData.length,
+        percentage: completedPercentage,
+        chunk: {
+          current: chunkIndex + 1,
+          total: totalChunks,
+        },
+      });
     }
+    // ==================== FIN CHUNKING ====================
+
+    const duration = Date.now() - startTime;
+    console.log(`[Import] Terminé: ${totalImported} lignes en ${duration}ms (${totalChunks} chunks)`);
 
     // Sauvegarder/mettre à jour le profil
     if (profileMode !== 'skip') {
@@ -1007,10 +1079,9 @@ const handleConfirmFullImport = useCallback(async () => {
 
     setImportSuccess({
       success: true,
-      importId: result.importId || `imp_${Date.now()}`,
-      rowsImported: testSampleSize + remainingData.length,
-      duration: result.duration || 0,
-      zohoImportId: result.importId,
+      importId: `imp_${Date.now()}`,
+      rowsImported: testSampleSize + totalImported,
+      duration,
       verification: state.testResult?.verification,
     });
 
@@ -1026,9 +1097,9 @@ const handleConfirmFullImport = useCallback(async () => {
     setProfileMode('skip');
     setVerificationSample([]);
     setTestMatchingValues([]);
-testMatchingValuesRef.current = [];
-setVerificationColumn(null);
-verificationColumnRef.current = null;
+    testMatchingValuesRef.current = [];
+    setVerificationColumn(null);
+    verificationColumnRef.current = null;
 
   } catch (error) {
     console.error('Erreur import complet:', error);
@@ -1050,7 +1121,7 @@ verificationColumnRef.current = null;
   updateProgress,
   setImportSuccess,
   setImportError,
-  getColumnTypesFromSchema,  // ← NOUVEAU : Ajouter à la liste des dépendances
+  getColumnTypesFromSchema,
 ]);
 
 /**
