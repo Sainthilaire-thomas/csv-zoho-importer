@@ -1,6 +1,6 @@
 ﻿# Structure du projet - csv-zoho-importer
 
-*Genere le 2026-01-19 09:55:33*
+*Genere le 2026-01-19 14:08:32*
 ```
 csv-zoho-importer/
 |-- .vscode/
@@ -63,6 +63,8 @@ csv-zoho-importer/
 |   |       |   |-- callback/
 |   |       |   |-- disconnect/
 |   |       |   +-- status/
+|   |       |-- sample-row/
+|   |       |   +-- route.ts
 |   |       |-- sql-query/
 |   |       |   +-- route.ts
 |   |       |-- tables/
@@ -135,6 +137,7 @@ csv-zoho-importer/
 |   |   |   |-- mission-007-import-2-phases-rollback.md
 |   |   |   |-- mission-008-dashboard-distribution.md
 |   |   |   |-- mission-009-transform-source-verite.md
+|   |   |   |-- mission-010-ux-transformation-verification.md
 |   |   |   +-- TEMPLATE-MISSION.md
 |   |   |-- base-context.md
 |   |   +-- README.md

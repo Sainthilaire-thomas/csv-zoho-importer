@@ -254,15 +254,16 @@ const testMatchingValuesRef = useRef<string[]>([]);
       const schema = await fetchZohoSchema(selectedWorkspaceId, state.config.tableId, state.config.tableName);
       setZohoSchema(schema);
 
+     
       // Phase 2b: Récupération d'une ligne de référence Zoho (pour preview)
       try {
         const refResponse = await fetch(
-          `/api/zoho/data?workspaceId=${selectedWorkspaceId}&viewId=${state.config.tableId}&limit=1`
+         `/api/zoho/sample-row?workspaceId=${selectedWorkspaceId}&tableName=${encodeURIComponent(state.config.tableName)}`
         );
         const refData = await refResponse.json();
-        if (refData.success && refData.data && refData.data.length > 0) {
-          setZohoReferenceRow(refData.data[0]);
-          console.log('[Reference] Ligne Zoho de référence récupérée');
+        if (refData.success && refData.data) {
+          setZohoReferenceRow(refData.data);
+          console.log('[Reference] Ligne Zoho de référence récupérée:', refData.data);
         } else {
           setZohoReferenceRow(null);
           console.log('[Reference] Aucune donnée existante dans la table');

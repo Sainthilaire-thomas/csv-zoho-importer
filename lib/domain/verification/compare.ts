@@ -4,6 +4,8 @@
  *
  * Compare les données envoyées à Zoho avec ce qui a été réellement stocké
  * pour détecter les anomalies.
+ * 
+ * Sprint 4 - Mission 010 : Support Bulk API async pour grosses tables
  */
 
 import type {
@@ -24,6 +26,13 @@ const DEFAULT_DELAY_MS = 2000;
 
 /** Longueur max avant de considérer une troncature possible */
 const TRUNCATION_THRESHOLD = 250;
+
+// ==================== CACHE ====================
+
+/**
+ * Cache pour les noms de tables (évite les appels répétés)
+ */
+const tableNameCache = new Map<string, string>();
 
 // ==================== FONCTION PRINCIPALE ====================
 
@@ -57,7 +66,7 @@ export async function verifyImport(
     // 2. Trouver la colonne de matching
     const matchingColumn = config.matchingColumn || findBestMatchingColumn(sentRows);
     console.log('[Verification] Using matching column:', matchingColumn);
-    
+
     // 3. Récupérer les données depuis Zoho
     const receivedRows = await fetchRowsFromZoho(sentRows, config, matchingColumn);
 
@@ -79,9 +88,9 @@ export async function verifyImport(
 
     // 4. Comparer les données et construire le détail
     const { anomalies, comparedRows } = compareRowsDetailed(
-      sentRows, 
-      receivedRows, 
-      config, 
+      sentRows,
+      receivedRows,
+      config,
       matchingColumn
     );
 
@@ -118,14 +127,15 @@ export async function verifyImport(
 
 /**
  * Récupère les lignes depuis Zoho pour comparaison
- * Utilise la colonne de matching pour filtrer
+ * Utilise l'API Bulk async pour supporter les grosses tables
+ * Avec fallback vers l'API synchrone pour les petites tables
  */
 async function fetchRowsFromZoho(
   sentRows: SentRow[],
   config: VerificationConfig,
   matchingColumn: string | undefined
 ): Promise<Record<string, unknown>[]> {
-  
+
   if (!matchingColumn) {
     console.warn('[Verification] Aucune colonne de matching trouvée, vérification impossible');
     return [];
@@ -141,17 +151,47 @@ async function fetchRowsFromZoho(
     return [];
   }
 
-  // Construire le critère SQL
-  const criteria = buildInCriteria(matchingColumn, matchingValues);
   console.log('[Verification] Matching column:', matchingColumn);
-  console.log('[Verification] Criteria:', criteria);
+  console.log('[Verification] Matching values:', matchingValues);
 
-  // Appel API
+  // Essayer d'abord la nouvelle API async (supporte les grosses tables)
+  try {
+    const tableName = await getTableNameFromViewId(config.workspaceId, config.viewId);
+
+    if (tableName) {
+      console.log('[Verification] Using async API with tableName:', tableName);
+
+      const params = new URLSearchParams({
+        workspaceId: config.workspaceId,
+        tableName: tableName,
+        matchingColumn: matchingColumn,
+        matchingValues: JSON.stringify(matchingValues),
+        limit: String(config.sampleSize * 2),
+      });
+
+      const response = await fetch(`/api/zoho/verify-data?${params.toString()}`);
+      const result = await response.json();
+
+      if (response.ok && result.success) {
+        console.log('[Verification] Async API returned', result.rowCount, 'rows');
+        return result.data || [];
+      }
+
+      console.warn('[Verification] Async API failed, trying sync fallback:', result.error);
+    }
+  } catch (asyncError) {
+    console.warn('[Verification] Async API error, trying sync fallback:', asyncError);
+  }
+
+  // Fallback vers l'API synchrone (pour les petites tables)
+  console.log('[Verification] Using sync API fallback');
+  const criteria = buildInCriteria(matchingColumn, matchingValues);
+
   const params = new URLSearchParams({
     workspaceId: config.workspaceId,
     viewId: config.viewId,
     criteria: criteria,
-    limit: String(config.sampleSize * 2), // Marge de sécurité
+    limit: String(config.sampleSize * 2),
   });
 
   const response = await fetch(`/api/zoho/data?${params.toString()}`);
@@ -165,6 +205,36 @@ async function fetchRowsFromZoho(
 }
 
 /**
+ * Récupère le nom de la table depuis le viewId
+ * Utilise un cache en mémoire pour éviter les appels répétés
+ */
+async function getTableNameFromViewId(workspaceId: string, viewId: string): Promise<string | null> {
+  const cacheKey = `${workspaceId}:${viewId}`;
+
+  if (tableNameCache.has(cacheKey)) {
+    return tableNameCache.get(cacheKey)!;
+  }
+
+  try {
+    // Appeler l'API pour récupérer les infos de la vue
+    const response = await fetch(`/api/zoho/tables?workspaceId=${workspaceId}`);
+    const result = await response.json();
+
+    if (response.ok && result.tables) {
+      const table = result.tables.find((t: { id: string; name: string }) => t.id === viewId);
+      if (table) {
+        tableNameCache.set(cacheKey, table.name);
+        return table.name;
+      }
+    }
+  } catch (error) {
+    console.warn('[Verification] Failed to get table name:', error);
+  }
+
+  return null;
+}
+
+/**
  * Trouve la meilleure colonne pour le matching
  * Cherche une colonne avec des valeurs uniques dans l'échantillon
  */
@@ -172,7 +242,7 @@ function findBestMatchingColumn(sentRows: SentRow[]): string | undefined {
   if (sentRows.length === 0) return undefined;
 
   const columns = Object.keys(sentRows[0].data);
-  
+
   // Colonnes candidates (noms typiques de colonnes uniques)
   const preferredPatterns = [
     /num[eé]ro/i,
@@ -268,7 +338,7 @@ function compareRowsDetailed(
 
     // Comparer chaque colonne
     const columns: ComparedColumn[] = [];
-    
+
     for (const [column, sentValue] of Object.entries(sentRow.data)) {
       const receivedValue = receivedRow[column];
       const sentStr = String(sentValue ?? '');
@@ -291,8 +361,8 @@ function compareRowsDetailed(
         normalizedValue: normalizedSent,
         receivedValue: receivedStr,
         match: match || (!sentStr && !receivedStr),
-        anomalyType: !match && (sentStr || receivedStr) 
-          ? detectAnomalyType(sentStr, receivedStr) 
+        anomalyType: !match && (sentStr || receivedStr)
+          ? detectAnomalyType(sentStr, receivedStr)
           : undefined,
       });
     }
@@ -319,7 +389,7 @@ function findMatchingRow(
 ): Record<string, unknown> | undefined {
   // Utiliser la colonne de matching
   const colToMatch = matchingColumn || config.matchingColumn;
-  
+
   if (colToMatch) {
     const sentValue = normalizeValue(sentRow.data[colToMatch]);
     return receivedRows.find(
@@ -366,7 +436,7 @@ function detectAnomalyType(sentValue: string, receivedValue: string): AnomalyTyp
   if (isTruncated(sentValue, receivedValue)) return 'truncated';
   if (isRounded(sentValue, receivedValue)) return 'rounded';
   if (hasEncodingIssue(sentValue, receivedValue)) return 'encoding_issue';
-if (isSpacesTrimmed(sentValue, receivedValue)) return 'spaces_trimmed';
+  if (isSpacesTrimmed(sentValue, receivedValue)) return 'spaces_trimmed';
   return 'value_different';
 }
 
@@ -422,11 +492,11 @@ function detectAnomaly(
   if (hasEncodingIssue(sentValue, receivedValue)) {
     return createAnomaly('encoding_issue', rowIndex, column, sentValue, receivedValue);
   }
-  
+
   // Détecter espaces supprimés
-if (isSpacesTrimmed(sentValue, receivedValue)) {
-  return createAnomaly('spaces_trimmed', rowIndex, column, sentValue, receivedValue);
-}
+  if (isSpacesTrimmed(sentValue, receivedValue)) {
+    return createAnomaly('spaces_trimmed', rowIndex, column, sentValue, receivedValue);
+  }
 
   // Valeur différente (cas général)
   return createAnomaly('value_different', rowIndex, column, sentValue, receivedValue);
@@ -448,15 +518,15 @@ const MONTH_MAP: Record<string, string> = {
  */
 function tryParseDateToCanonical(str: string): string | null {
   if (!str || typeof str !== 'string') return null;
-  
+
   const trimmed = str.trim();
-  
+
   // Format ISO : 2025-04-04 ou 2025-04-04T00:00:00
   const isoMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (isoMatch) {
     return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
   }
-  
+
   // Format Zoho : "04 Apr, 2025 00:00:00" ou "04 Apr, 2025"
   const zohoMatch = trimmed.match(/^(\d{2}) (\w{3}), (\d{4})/);
   if (zohoMatch) {
@@ -467,13 +537,13 @@ function tryParseDateToCanonical(str: string): string | null {
       return `${year}-${month}-${day}`;
     }
   }
-  
+
   // Format FR : 04/04/2025
   const frMatch = trimmed.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
   if (frMatch) {
     return `${frMatch[3]}-${frMatch[2]}-${frMatch[1]}`;
   }
-  
+
   return null;
 }
 
@@ -485,7 +555,7 @@ function normalizeValue(value: unknown): string {
 
   let str = String(value).trim();
 
-  // 1. NOUVEAU : Essayer de parser comme date
+  // 1. Essayer de parser comme date
   const parsedDate = tryParseDateToCanonical(str);
   if (parsedDate) {
     return parsedDate;
@@ -517,22 +587,22 @@ function normalizeValue(value: unknown): string {
 function isDatetimeTruncatedToDate(sent: string, received: string): boolean {
   // Pattern : date avec heure
   const datetimePattern = /^(\d{2}\/\d{2}\/\d{2,4})\s+(\d{2}:\d{2}:\d{2})$/;
-  
+
   const sentMatch = sent.match(datetimePattern);
   const receivedMatch = received.match(datetimePattern);
-  
+
   if (sentMatch && receivedMatch) {
     const sentDate = sentMatch[1];
     const sentTime = sentMatch[2];
     const receivedDate = receivedMatch[1];
     const receivedTime = receivedMatch[2];
-    
+
     // Même date mais heure reçue = 00:00:00 (heure perdue)
     if (sentDate === receivedDate && sentTime !== '00:00:00' && receivedTime === '00:00:00') {
       return true;
     }
   }
-  
+
   return false;
 }
 
@@ -544,7 +614,7 @@ function isSpacesTrimmed(sent: string, received: string): boolean {
   // Normaliser les espaces autour des virgules et ponctuations
   const normalizedSent = sent.replace(/\s*([,;:])\s*/g, '$1').trim();
   const normalizedReceived = received.replace(/\s*([,;:])\s*/g, '$1').trim();
-  
+
   // Si égaux après normalisation des espaces, c'est bien ce cas
   return normalizedSent.toLowerCase() === normalizedReceived.toLowerCase() && sent !== received;
 }
@@ -607,7 +677,7 @@ function isRounded(sent: string, received: string): boolean {
   const receivedNum = parseFloat(received.replace(',', '.').replace(/\s/g, ''));
 
   if (isNaN(sentNum) || isNaN(receivedNum)) return false;
-  
+
   // Si égaux après normalisation, pas d'arrondi
   if (sentNum === receivedNum) return false;
 

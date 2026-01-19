@@ -1,11 +1,14 @@
+
 # Mission 010 - UX Transformation et Vérification
 
 ## 📋 Objectif
 
 Améliorer l'expérience utilisateur pour :
+
 1. Visualiser clairement les transformations de données (Excel → Zoho)
 2. Comparer correctement les données après import (formats différents mais valeurs identiques)
 3. Respecter les espaces dans les textes (demande client)
+4. Afficher une ligne de référence Zoho dans le preview
 
 ---
 
@@ -14,484 +17,288 @@ Améliorer l'expérience utilisateur pour :
 ### Problème actuel
 
 1. **Comparaison des dates** : Zoho affiche `"04 Apr, 2025 00:00:00"` mais on envoie `"2025-04-04"`. L'utilisateur ne comprend pas que c'est la même valeur.
-
 2. **Trim automatique non souhaité** : Les espaces dans les textes sont supprimés automatiquement, mais le client a des filtres Zoho qui dépendent de ces espaces (ex: `"BUS                   "`).
-
 3. **Manque de clarté** : L'utilisateur ne voit pas clairement le flux : Fichier → Transformation → Envoi → Affichage Zoho.
+4. **Pas de référence visuelle** : L'utilisateur ne peut pas comparer avec des données existantes dans Zoho.
+5. **Vérification impossible sur grosses tables** : L'API synchrone `/api/zoho/data` retourne `SYNC_EXPORT_NOT_ALLOWED` pour les tables > 1M lignes.
 
 ### Solution proposée
 
 Améliorer l'affichage avec des colonnes explicites :
+
 - **📄 Fichier Excel** : Valeur brute source
 - **🔄 Sera envoyé à Zoho** : Après transformation
-- **👁️ Zoho affichera** : Format d'affichage prévu
-- **📥 Zoho a affiché** : Valeur vérifiée après import
-- **🔍 Interprétation** : Explication humaine (identique, différent, anomalie)
+- **👁️ Zoho affichera** : Format d'affichage prévu (prédiction)
+- **📋 Exemple Zoho** : Valeur réelle d'une ligne existante (référence)
 
 ---
 
-## 🏃 Sprint 1 : Correction du trim automatique (Bug fix prioritaire)
+## 🏃 Sprint 1 : Correction du trim automatique ✅ TERMINÉ
 
 ### Objectif
+
 Supprimer le trim automatique des textes pour préserver les espaces, **tout en restant compatible avec la Mission 009** (qui corrigeait le bug des `\n` cassant le CSV).
 
-### ⚠️ Compatibilité Mission 009
-
-La Mission 009 a introduit le nettoyage des `\r\n` pour éviter l'erreur :
-```
-"TEL-26-01-3587" - ERREUR : Valeur Date non valide
-```
-
-**Ce qu'on garde** : `value.replace(/[\r\n]+/g, ' ')` → Les sauts de ligne sont remplacés par des espaces
-**Ce qu'on supprime** : `.trim()` → Les espaces en début/fin sont préservés
-
-### Fichiers à modifier
+### Fichiers modifiés
 
 #### 1. `lib/domain/data-transformer.ts`
 
-**Ligne ~247** - Fonction `applyAllTransformations()` :
-```typescript
-// AVANT (Mission 009)
-let cleaned = value.replace(/[\r\n]+/g, ' ').trim();
-
-// APRÈS (Compatible 009 + 010) - Supprimer uniquement le .trim()
-let cleaned = value.replace(/[\r\n]+/g, ' ');
-// ✅ Les \r\n sont toujours remplacés (évite bug CSV - Mission 009)
-// ✅ Les espaces début/fin sont préservés (demande client - Mission 010)
-```
-
-**Ligne ~206** - Case 'none' dans `transformValue()` :
-```typescript
-// AVANT
-case 'none':
-default:
-  return { success: true, value: trimmed };
-
-// APRÈS - Garder la valeur après remplacement \r\n mais sans trim
-case 'none':
-default:
-  // Remplacer les sauts de ligne mais préserver les espaces
-  const withoutNewlines = String(value).replace(/[\r\n]+/g, ' ');
-  return { success: true, value: withoutNewlines };
-```
+- **Ligne 267** : Suppression du `.trim()` dans `applyAllTransformations()`
+- **Lignes 237-239** : Case 'none' modifié pour préserver les espaces
 
 #### 2. `lib/domain/schema-validator.ts`
 
-**Ligne ~420** - Fonction `getTransformNeeded()` :
-```typescript
-// AVANT
-if (fileType === 'string') {
-  return 'trim';
-}
+- **Lignes 533-534** : Changement du défaut pour les strings (`'none'` au lieu de `'trim'`)
 
-// APRÈS - Ne plus proposer trim automatiquement
-if (fileType === 'string') {
-  return 'none';  // Préserver les espaces
-}
-```
+### Comportement final
 
-### Récapitulatif des comportements
+| Valeur source        | Résultat                                    |
+| -------------------- | -------------------------------------------- |
+| `"BUS   "`         | `"BUS   "` ✅ (espaces préservés)        |
+| `"Ligne1\nLigne2"` | `"Ligne1 Ligne2"` ✅ (newlines remplacés) |
 
-| Valeur source | Après Mission 009 | Après Mission 010 |
-|---------------|-------------------|-------------------|
-| `"BUS\n"` | `"BUS"` | `"BUS "` |
-| `"  BUS  "` | `"BUS"` | `"  BUS  "` |
-| `"Ligne1\nLigne2"` | `"Ligne1 Ligne2"` | `"Ligne1 Ligne2"` |
-| `"\nTEL-26-01"` | `"TEL-26-01"` | `" TEL-26-01"` |
+### Commit
 
-### Tests à effectuer
-- [ ] Importer un fichier avec des valeurs contenant des espaces (ex: `"BUS                   "`)
-- [ ] Vérifier que les espaces sont préservés dans Zoho
-- [ ] Vérifier que les sauts de ligne `\r\n` sont toujours remplacés par des espaces
-- [ ] **Test de non-régression** : Importer un fichier avec `\n` dans une cellule → ne doit pas créer d'erreur "Valeur Date non valide"
-
-### Critères de validation
-- ✅ Les espaces dans les textes sont préservés
-- ✅ Les sauts de ligne sont convertis en espaces (évite les erreurs CSV - Mission 009)
-- ✅ Les filtres Zoho existants continuent de fonctionner
-- ✅ Pas de régression sur le bug de la Mission 009
+`b42ec5e` - "fix(sprint1): préserver les espaces dans les textes - Mission 010"
 
 ---
 
-## 🏃 Sprint 2 : Normalisation des dates pour comparaison
+## 🏃 Sprint 2 : Normalisation des dates pour comparaison ✅ TERMINÉ
 
 ### Objectif
-Permettre la comparaison correcte entre formats de date différents.
 
-### Fichier à modifier
+Permettre la comparaison correcte entre formats de date différents (ISO vs Zoho).
+
+### Fichier modifié
 
 #### `lib/domain/verification/compare.ts`
 
-**Ajouter une fonction de parsing de dates** (avant `normalizeValue`) :
+1. **Ajout `MONTH_MAP`** : Mapping mois anglais → numéro
+2. **Ajout `tryParseDateToCanonical()`** : Parse plusieurs formats (ISO, Zoho, FR)
+3. **Modification `normalizeValue()`** : Appel du parsing date en premier
 
-```typescript
-/**
- * Mapping des mois en anglais vers numéro
- */
-const MONTH_MAP: Record<string, string> = {
-  Jan: '01', Feb: '02', Mar: '03', Apr: '04', May: '05', Jun: '06',
-  Jul: '07', Aug: '08', Sep: '09', Oct: '10', Nov: '11', Dec: '12',
-};
+### Résultat
 
-/**
- * Tente de parser une chaîne comme date et retourne un format canonique YYYY-MM-DD
- * Gère plusieurs formats : ISO, Zoho, FR
- */
-function tryParseDateToCanonical(str: string): string | null {
-  if (!str || typeof str !== 'string') return null;
-  
-  const trimmed = str.trim();
-  
-  // Format ISO : 2025-04-04 ou 2025-04-04T00:00:00
-  const isoMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (isoMatch) {
-    return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
-  }
-  
-  // Format Zoho : "04 Apr, 2025 00:00:00" ou "04 Apr, 2025"
-  const zohoMatch = trimmed.match(/^(\d{2}) (\w{3}), (\d{4})/);
-  if (zohoMatch) {
-    const day = zohoMatch[1];
-    const month = MONTH_MAP[zohoMatch[2]];
-    const year = zohoMatch[3];
-    if (month) {
-      return `${year}-${month}-${day}`;
-    }
-  }
-  
-  // Format FR : 04/04/2025
-  const frMatch = trimmed.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-  if (frMatch) {
-    return `${frMatch[3]}-${frMatch[2]}-${frMatch[1]}`;
-  }
-  
-  return null;
-}
-```
+`"2025-04-04"` et `"04 Apr, 2025 00:00:00"` sont maintenant considérés comme identiques.
 
-**Modifier `normalizeValue()`** :
+### Commit
 
-```typescript
-function normalizeValue(value: unknown): string {
-  if (value === null || value === undefined) return '';
-
-  let str = String(value).trim();
-
-  // 1. NOUVEAU : Essayer de parser comme date
-  const parsedDate = tryParseDateToCanonical(str);
-  if (parsedDate) {
-    return parsedDate;
-  }
-
-  // 2. Normaliser les nombres (code existant)
-  const numMatch = str.match(/^-?\d+([.,]\d+)?$/);
-  if (numMatch) {
-    const num = parseFloat(str.replace(',', '.'));
-    if (!isNaN(num)) {
-      if (Number.isInteger(num)) {
-        str = String(Math.round(num));
-      } else {
-        str = num.toFixed(6).replace(/\.?0+$/, '');
-      }
-    }
-  }
-
-  return str.toLowerCase();
-}
-```
-
-### Tests à effectuer
-- [ ] Comparer `"2025-04-04"` avec `"04 Apr, 2025 00:00:00"` → doit matcher
-- [ ] Comparer `"2025-03-31"` avec `"31 Mar, 2025 00:00:00"` → doit matcher
-- [ ] Comparer `"04/04/2025"` avec `"04 Apr, 2025"` → doit matcher
-
-### Critères de validation
-- ✅ Les dates en format ISO et format Zoho sont considérées identiques
-- ✅ Pas de faux positifs "value_different" sur les dates
+`fc85f88` - "feat(sprint2): normalisation des dates pour comparaison - Mission 010"
 
 ---
 
-## 🏃 Sprint 3 : Amélioration de l'affichage Preview (avant import)
+## 🏃 Sprint 3 : Amélioration affichage Preview ✅ TERMINÉ
 
 ### Objectif
-Afficher clairement les 3 colonnes : Excel → Transformé → Zoho affichera
 
-### Fichier à modifier
+Afficher le flux 3 niveaux : 📄 Fichier → 🔄 Transformé → 👁️ Zoho affichera
+
+### Fichier modifié
 
 #### `components/import/wizard/step-transform-preview.tsx`
 
-**Modifier le header du tableau** :
+1. **Ajout `predictZohoDisplay()`** : Prédit le format d'affichage Zoho
+2. **Modification rendu cellules** : Affichage des 3 niveaux avec icônes
+3. **Légende mise à jour** : Explique les 3 niveaux
 
-```tsx
-<thead>
-  <tr>
-    <th>Colonne</th>
-    <th>📄 Fichier Excel</th>
-    <th>🔄 Sera envoyé à Zoho</th>
-    <th>👁️ Zoho affichera</th>
-    <th>Statut</th>
-  </tr>
-</thead>
-```
+### Commits
 
-**Ajouter une fonction pour prédire l'affichage Zoho** :
-
-```typescript
-/**
- * Prédit comment Zoho affichera une valeur basé sur le type de colonne
- */
-function predictZohoDisplay(value: string, zohoType: string | null): string {
-  if (!value) return '';
-  
-  // Pour les dates, Zoho affiche en format "DD Mon, YYYY"
-  if (zohoType === 'DATE' || zohoType === 'DATE_AS_DATE' || zohoType === 'DATE_TIME') {
-    const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    if (match) {
-      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 
-                      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-      const day = match[3];
-      const month = months[parseInt(match[2], 10) - 1];
-      const year = match[1];
-      
-      if (zohoType === 'DATE' || zohoType === 'DATE_AS_DATE') {
-        return `${day} ${month}, ${year}`;
-      } else {
-        return `${day} ${month}, ${year} 00:00:00`;
-      }
-    }
-  }
-  
-  return value;
-}
-```
-
-**Modifier le rendu des lignes** :
-
-```tsx
-{relevantColumns.map((col) => {
-  const originalValue = getOriginalValue(col.fileColumn, rowIndex);
-  const transformedValue = getTransformedValue(col.fileColumn, rowIndex);
-  const zohoPreview = predictZohoDisplay(transformedValue, col.zohoType);
-  const isMatch = normalizeForComparison(transformedValue) === normalizeForComparison(zohoPreview);
-  
-  return (
-    <tr key={col.fileColumn}>
-      <td>{col.fileColumn}</td>
-      <td className="font-mono text-sm">{originalValue}</td>
-      <td className="font-mono text-sm">{transformedValue}</td>
-      <td className="font-mono text-sm text-muted-foreground">{zohoPreview}</td>
-      <td>{isMatch ? '✅ Prévu' : '⚠️ Attention'}</td>
-    </tr>
-  );
-})}
-```
-
-### Critères de validation
-- ✅ L'utilisateur voit les 3 colonnes clairement
-- ✅ Le format Zoho prédit est affiché
-- ✅ Une légende explique les colonnes
+- `3f4c2fa` - "feat(sprint3): amélioration affichage Preview - Mission 010"
+- `80bff07` - "fix(sprint3): amélioration predictZohoDisplay pour datetime - Mission 010"
 
 ---
 
-## 🏃 Sprint 4 : Amélioration de l'affichage Test Result (après import)
+## 🏃 Sprint 4 : Vérification post-import pour grosses tables ✅ TERMINÉ
 
 ### Objectif
-Afficher clairement : Envoyé → Zoho a affiché → Interprétation
 
-### Fichier à modifier
+Adapter la vérification post-import pour utiliser l'API Bulk async au lieu de l'API synchrone qui échoue sur les grosses tables.
 
-#### `components/import/wizard/step-test-result.tsx`
+### Problème résolu
 
-**Modifier le composant `ComparedRowDetail`** :
+L'API `/api/zoho/data` avec export synchrone retourne une erreur pour les grosses tables (>1M lignes) :
 
-```tsx
-function ComparedRowDetail({ row, matchingColumn }: { row: ComparedRow; matchingColumn?: string }) {
-  // ... code existant ...
-  
-  return (
-    <div className="border rounded-lg overflow-hidden">
-      {/* Header avec légende */}
-      <div className="bg-muted/50 p-3 border-b">
-        <div className="flex gap-4 text-xs text-muted-foreground">
-          <span>📤 <strong>Envoyé à Zoho</strong> : Ce qui a été envoyé</span>
-          <span>📥 <strong>Zoho a affiché</strong> : Ce que Zoho a stocké</span>
-          <span>🔍 <strong>Interprétation</strong> : Analyse de la correspondance</span>
-        </div>
-      </div>
-      
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="bg-muted/30">
-            <th className="px-3 py-2 text-left">Colonne</th>
-            <th className="px-3 py-2 text-left">📤 Envoyé à Zoho</th>
-            <th className="px-3 py-2 text-left">📥 Zoho a affiché</th>
-            <th className="px-3 py-2 text-left">🔍 Interprétation</th>
-            <th className="px-3 py-2 text-center">Verdict</th>
-          </tr>
-        </thead>
-        <tbody>
-          {relevantColumns.map((col: ComparedColumn) => (
-            <tr key={col.name} className={col.match ? '' : 'bg-red-50 dark:bg-red-900/10'}>
-              <td className="px-3 py-2 font-medium">{col.name}</td>
-              <td className="px-3 py-2 font-mono text-xs">{col.sentValue}</td>
-              <td className="px-3 py-2 font-mono text-xs">{col.receivedValue}</td>
-              <td className="px-3 py-2 text-xs">
-                {getInterpretation(col)}
-              </td>
-              <td className="px-3 py-2 text-center">
-                {col.match ? (
-                  <span className="text-green-600">✅ Correct</span>
-                ) : (
-                  <span className="text-red-600">❌ Anomalie</span>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-/**
- * Génère une interprétation humaine de la comparaison
- */
-function getInterpretation(col: ComparedColumn): string {
-  if (col.match) {
-    // Vérifier si les formats sont différents mais valeurs identiques
-    if (col.sentValue !== col.receivedValue) {
-      return `✅ Même valeur (formats différents)`;
-    }
-    return `✅ Identique`;
-  }
-  
-  // Anomalies spécifiques
-  switch (col.anomalyType) {
-    case 'datetime_truncated':
-      return `⚠️ Heure perdue (${col.sentValue} → ${col.receivedValue})`;
-    case 'date_inverted':
-      return `❌ Jour/mois inversés`;
-    case 'truncated':
-      return `❌ Texte tronqué`;
-    case 'rounded':
-      return `⚠️ Nombre arrondi`;
-    case 'spaces_trimmed':
-      return `⚠️ Espaces supprimés`;
-    case 'value_missing':
-      return `❌ Valeur manquante dans Zoho`;
-    default:
-      return `❌ Valeur différente`;
-  }
-}
+```
+"SYNC_EXPORT_NOT_ALLOWED" - Exportation synchrone non autorisée
 ```
 
-### Critères de validation
-- ✅ L'utilisateur comprend clairement ce qui a été envoyé vs reçu
-- ✅ L'interprétation explique si c'est identique malgré le format différent
-- ✅ Les anomalies sont clairement identifiées avec une explication
+### Solution implémentée
+
+Création d'une nouvelle API `/api/zoho/verify-data` utilisant **Bulk Export Async avec SQL Query filtré** :
+
+1. Récupère le nom de la table depuis le viewId
+2. Crée un job d'export avec `SELECT * FROM "Table" WHERE "col" IN (...) LIMIT N`
+3. Poll le statut du job jusqu'à completion
+4. Télécharge et retourne les données filtrées
+
+### Fichiers créés
+
+#### `app/api/zoho/verify-data/route.ts` (NOUVEAU)
+
+```typescript
+// Endpoint
+GET /api/zoho/verify-data?workspaceId=X&tableName=Y&matchingColumn=Z&matchingValues=[...]
+
+// Flow interne
+1. Construire SQL: SELECT * FROM "tableName" WHERE "matchingColumn" IN (values)
+2. POST /bulk/workspaces/{id}/data?CONFIG={sqlQuery}
+   → Retourne jobId
+3. GET /bulk/workspaces/{id}/exportjobs/{jobId}
+   → Poll jusqu'à jobCode="1004"
+4. GET /bulk/workspaces/{id}/exportjobs/{jobId}/data
+   → Retourne les données JSON filtrées
+```
+
+### Fichiers modifiés
+
+#### `lib/domain/verification/compare.ts`
+
+- **Nouvelle fonction `fetchRowsFromZoho()`** : Utilise l'API async en priorité avec fallback sync
+- **Nouvelle fonction `getTableNameFromViewId()`** : Récupère le nom de table avec cache
+- **Cache `tableNameCache`** : Évite les appels répétés à l'API tables
+
+### Résultat
+
+```
+[VerifyData] SQL Query: SELECT * FROM "QUITTANCES2" WHERE "Numéro Quittance" IN ('...') LIMIT 10
+[VerifyData] Job created: 1718953000034680001
+[VerifyData] Poll 1 - jobCode: 1004
+[VerifyData] Success - got 5 rows
+```
+
+- ✅ Fonctionne sur table QUITTANCES2 (56024+ lignes)
+- ✅ Vérification post-import réussie avec Bulk API async
+- ✅ Fallback automatique vers API sync pour petites tables
 
 ---
 
-## 🏃 Sprint 5 : Ajout d'une ligne de référence Zoho (optionnel)
+## 🏃 Sprint 5 : Ligne de référence Zoho ✅ TERMINÉ
 
 ### Objectif
-Récupérer une ligne existante de Zoho pour servir de référence visuelle.
 
-### Fichiers à modifier
+Afficher une ligne existante de Zoho comme référence visuelle dans le preview.
 
-#### 1. `components/import/wizard/import-wizard.tsx`
+### Fichiers créés/modifiés
 
-**Ajouter un state pour les données de référence** :
+#### `app/api/zoho/sample-row/route.ts`
 
-```typescript
-const [zohoReferenceRow, setZohoReferenceRow] = useState<Record<string, unknown> | null>(null);
-```
+- Utilise Bulk API async avec `SELECT * FROM "TableName" LIMIT 1`
 
-**Récupérer une ligne de référence après sélection de la table** :
+#### `components/import/wizard/import-wizard.tsx`
 
-```typescript
-const fetchZohoReferenceRow = useCallback(async (workspaceId: string, viewId: string) => {
-  try {
-    const response = await fetch(
-      `/api/zoho/data?workspaceId=${workspaceId}&viewId=${viewId}&limit=1`
-    );
-    const data = await response.json();
-    
-    if (data.success && data.data && data.data.length > 0) {
-      setZohoReferenceRow(data.data[0]);
-      console.log('[Reference] Ligne Zoho de référence:', data.data[0]);
-    }
-  } catch (error) {
-    console.error('[Reference] Erreur récupération référence:', error);
-  }
-}, []);
-```
+- Ajout state `zohoReferenceRow`
+- Appel à `/api/zoho/sample-row` avec `tableName`
 
-#### 2. `components/import/wizard/step-transform-preview.tsx`
+#### `components/import/wizard/step-transform-preview.tsx`
 
-**Ajouter une colonne "Exemple Zoho existant"** :
+- Affichage 📋 dans le header de chaque colonne avec valeur de référence
 
-```tsx
-<th>📋 Exemple Zoho existant</th>
+### Résultat
 
-// Dans le corps du tableau
-<td className="font-mono text-xs text-muted-foreground">
-  {zohoReferenceRow?.[col.zohoColumn] || '—'}
-</td>
-```
-
-### Critères de validation
-- ✅ Une ligne existante de Zoho est affichée comme référence
-- ✅ L'utilisateur peut comparer visuellement ses données avec l'existant
-- ✅ Si la table est vide, afficher "Aucune donnée existante"
+- ✅ Affiche les valeurs de référence en violet/rose dans les headers
+- ✅ L'utilisateur voit le format exact des données existantes dans Zoho
 
 ---
 
 ## 📊 Récapitulatif des sprints
 
-| Sprint | Priorité | Effort | Description |
-|--------|----------|--------|-------------|
-| **Sprint 1** | 🔴 Haute | 1h | Correction trim automatique |
-| **Sprint 2** | 🔴 Haute | 2h | Normalisation dates pour comparaison |
-| **Sprint 3** | 🟡 Moyenne | 3h | Amélioration affichage Preview |
-| **Sprint 4** | 🟡 Moyenne | 3h | Amélioration affichage Test Result |
-| **Sprint 5** | 🟢 Basse | 2h | Ligne de référence Zoho |
-
-**Effort total estimé : ~11h**
+| Sprint             | Statut      | Description                                 |
+| ------------------ | ----------- | ------------------------------------------- |
+| **Sprint 1** | ✅ Terminé | Correction trim automatique                 |
+| **Sprint 2** | ✅ Terminé | Normalisation dates pour comparaison        |
+| **Sprint 3** | ✅ Terminé | Amélioration affichage Preview (3 niveaux) |
+| **Sprint 4** | ✅ Terminé | Vérification post-import (Bulk API async)  |
+| **Sprint 5** | ✅ Terminé | Ligne de référence Zoho                   |
 
 ---
 
-## 🧪 Tests globaux à effectuer
+## 📝 Commits de la mission
 
-### Scénario 1 : Import avec dates
-- [ ] Fichier avec dates `04/04/2025` → transformé en `2025-04-04`
-- [ ] Vérification : `"04 Apr, 2025 00:00:00"` matche avec `"2025-04-04"`
+1. `b42ec5e` - fix(sprint1): préserver les espaces dans les textes
+2. `fc85f88` - feat(sprint2): normalisation des dates pour comparaison
+3. `3f4c2fa` - feat(sprint3): amélioration affichage Preview
+4. `80bff07` - fix(sprint3): amélioration predictZohoDisplay pour datetime
+5. `a10e61a` - feat(sprint5): ligne de référence Zoho dans preview
+6. `[À FAIRE]` - feat(sprint4): API verify-data avec Bulk async pour grosses tables
 
-### Scénario 2 : Import avec textes et espaces
-- [ ] Fichier avec `"BUS                   "` (espaces de padding)
-- [ ] Les espaces sont préservés dans Zoho
-- [ ] Les filtres Zoho existants fonctionnent
+---
 
-### Scénario 3 : Import avec datetime
-- [ ] Fichier avec heure `23:59:35`
-- [ ] Si colonne Zoho = DATE → alerte perte d'heure
-- [ ] Si colonne Zoho = DATETIME → heure préservée
+## 🧪 Tests effectués
+
+### ✅ Preview des transformations
+
+- Dates `04/04/2025` → `2025-04-04` → `04 Apr, 2025 00:00:00` affichées correctement
+- Les 3 niveaux (📄 → 🔄 → 👁️) s'affichent dans les cellules
+- "Inchangé" affiché quand pas de transformation
+
+### ✅ Comparaison des dates
+
+- `"2025-04-04"` matche avec `"04 Apr, 2025 00:00:00"` ✅
+- Plus de faux positifs "value_different" sur les dates
+
+### ✅ Référence Zoho (Sprint 5)
+
+- L'API `/api/zoho/sample-row` fonctionne avec Bulk API async
+- Testé sur table QUITTANCES2 (56024 lignes) ✅
+
+### ✅ Vérification post-import (Sprint 4)
+
+- L'API `/api/zoho/verify-data` fonctionne avec Bulk API async
+- Testé sur table QUITTANCES2 (56024 lignes) ✅
+- Les 5 lignes de test sont récupérées et comparées correctement
+
+---
+
+## ⚠️ TODO - Prochaine mission
+
+### Import par chunks pour gros fichiers
+
+L'import des données restantes (après test des 5 lignes) échoue si le fichier dépasse ~10MB :
+
+```
+Request body exceeded 10MB for /api/zoho/import
+```
+
+**Solution à implémenter :**
+
+- Découper l'import en chunks de 5000 lignes
+- Afficher la progression par chunk
+- Gérer les erreurs par chunk
 
 ---
 
 ## 📝 Notes techniques
 
 ### Formats de date Zoho
-- **DATE** : `"04 Apr, 2025"` ou `"04 Apr, 2025 00:00:00"`
-- **DATETIME** : `"04 Apr, 2025 23:59:35"`
+
+- **DATE** : `"04 Apr, 2025 00:00:00"` (affiche toujours l'heure 00:00:00)
+- **DATETIME** : `"04 Apr, 2025 23:59:35"` (préserve l'heure)
 - **Format d'import** : `yyyy-MM-dd` (ISO)
 
-### Comportement du trim
-- **Sauts de ligne** (`\r\n`) : Toujours remplacés par espace (sinon casse le CSV)
-- **Espaces en début/fin** : NE PLUS supprimer automatiquement
-- **Espaces internes** : Préserver tels quels
+### API Zoho - Bulk Export Async
+
+```
+# Créer job
+GET /restapi/v2/bulk/workspaces/{workspaceId}/data?CONFIG={sqlQuery, responseFormat}
+→ Retourne { data: { jobId: "xxx" } }
+
+# Poll statut
+GET /restapi/v2/bulk/workspaces/{workspaceId}/exportjobs/{jobId}
+→ Retourne { data: { jobCode: "1004", jobStatus: "JOB COMPLETED" } }
+
+# Télécharger données
+GET /restapi/v2/bulk/workspaces/{workspaceId}/exportjobs/{jobId}/data
+→ Retourne { data: [...] }
+```
+
+### jobCode values
+
+- `1001` / `1002` : En cours
+- `1003` : Échec
+- `1004` : Terminé ✅
 
 ---
 
 *Mission créée le : 2025-01-19*
-*Statut : 📋 À planifier*
+*Dernière mise à jour : 2025-01-19 15:30*
+*Statut : ✅ TERMINÉE (Sprint 4 complété)*
