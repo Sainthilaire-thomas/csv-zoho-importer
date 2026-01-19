@@ -81,6 +81,33 @@ function getTransformLabel(transformType: string | undefined): string | null {
   }
 }
 
+/**
+ * Prédit comment Zoho affichera une valeur basé sur le type de colonne
+ */
+function predictZohoDisplay(value: string, zohoType: string | null | undefined): string {
+  if (!value) return '';
+  
+  // Pour les dates, Zoho affiche en format "DD Mon, YYYY" ou "DD Mon, YYYY HH:mm:ss"
+  if (zohoType === 'DATE' || zohoType === 'DATE_AS_DATE' || zohoType === 'DATE_TIME') {
+    const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (match) {
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 
+                      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const day = match[3];
+      const month = months[parseInt(match[2], 10) - 1];
+      const year = match[1];
+      
+      if (zohoType === 'DATE' || zohoType === 'DATE_AS_DATE') {
+        return `${day} ${month}, ${year}`;
+      } else {
+        return `${day} ${month}, ${year} 00:00:00`;
+      }
+    }
+  }
+  
+  return value;
+}
+
 // =============================================================================
 // COMPOSANT PRINCIPAL
 // =============================================================================
@@ -221,37 +248,53 @@ export function StepTransformPreview({
                       <td className="px-3 py-2 text-gray-400 text-xs">
                         {rowIndex + 1}
                       </td>
-                      {displayColumns.map((col) => {
+                     {displayColumns.map((col) => {
                         const sourceValue = String(row[col.fileColumn] ?? '');
                         const transformedValue = applyTransformation(sourceValue, col.transformNeeded);
+                        const zohoPreview = predictZohoDisplay(transformedValue, col.zohoType);
                         const hasChanged = sourceValue !== transformedValue && sourceValue !== '';
-                        
+                        const zohoWillDiffer = transformedValue !== zohoPreview;
+
                         return (
                           <td key={col.fileColumn} className="px-3 py-2">
                             <div className="flex flex-col gap-1">
-                              {/* Valeur source */}
+                              {/* 📄 Valeur source (fichier) */}
                               <div className="flex items-center gap-2">
+                                <span className="text-gray-400 text-xs">📄</span>
                                 <span className="font-mono text-gray-600 dark:text-gray-400 text-xs">
                                   {sourceValue || <span className="italic text-gray-400">(vide)</span>}
                                 </span>
                               </div>
-                              
-                              {/* Flèche et valeur transformée */}
-                              {hasChanged ? (
+
+                              {/* 🔄 Valeur transformée (envoyée à Zoho) */}
+                              {hasChanged && (
                                 <div className="flex items-center gap-2">
-                                  <ArrowRight className="h-3 w-3 text-blue-500 shrink-0" />
+                                  <span className="text-blue-500 text-xs">🔄</span>
                                   <span className="font-mono text-blue-600 dark:text-blue-400 font-medium text-xs">
                                     {transformedValue}
                                   </span>
                                 </div>
-                              ) : sourceValue ? (
+                              )}
+
+                              {/* 👁️ Zoho affichera */}
+                              {sourceValue && zohoWillDiffer && (
+                                <div className="flex items-center gap-2">
+                                  <span className="text-purple-500 text-xs">👁️</span>
+                                  <span className="font-mono text-purple-600 dark:text-purple-400 text-xs">
+                                    {zohoPreview}
+                                  </span>
+                                </div>
+                              )}
+
+                              {/* ✅ Inchangé */}
+                              {sourceValue && !hasChanged && !zohoWillDiffer && (
                                 <div className="flex items-center gap-2">
                                   <Check className="h-3 w-3 text-green-500 shrink-0" />
                                   <span className="text-xs text-green-600 dark:text-green-400">
                                     Inchangé
                                   </span>
                                 </div>
-                              ) : null}
+                              )}
                             </div>
                           </td>
                         );
@@ -301,9 +344,14 @@ export function StepTransformPreview({
 
       {/* Note explicative */}
       <Alert variant="info" title="Comment lire ce tableau">
-        Chaque cellule montre la valeur de votre fichier source et, si une transformation est appliquée,
-        la valeur qui sera envoyée à Zoho. Les transformations sont automatiques et garantissent
-        la compatibilité avec Zoho Analytics.
+        <div className="space-y-2">
+          <p>Chaque cellule montre le flux de transformation de vos données :</p>
+          <ul className="text-sm space-y-1">
+            <li><span className="mr-2">📄</span><strong>Fichier Excel</strong> : Valeur brute de votre fichier</li>
+            <li><span className="mr-2">🔄</span><strong>Sera envoyé</strong> : Valeur après transformation (si différente)</li>
+            <li><span className="mr-2">👁️</span><strong>Zoho affichera</strong> : Format d'affichage dans Zoho (ex: dates)</li>
+          </ul>
+        </div>
       </Alert>
 
       {/* Boutons d'action */}
