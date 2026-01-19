@@ -531,9 +531,8 @@ function getTransformNeeded(
   }
   
   if (fileType === 'string') {
-    return 'trim';
+    return 'none';  // Préserver les espaces par défaut
   }
-  
   return 'none';
 }
 

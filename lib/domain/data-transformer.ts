@@ -236,7 +236,9 @@ function transformValue(
     
     case 'none':
     default:
-      return { success: true, value: trimmed };
+      // Préserver les espaces, uniquement remplacer les sauts de ligne
+      const withoutNewlines = String(value).replace(/[\r\n]+/g, ' ');
+      return { success: true, value: withoutNewlines };
   }
 }
 
@@ -263,8 +265,8 @@ export function applyAllTransformations(
     
     for (const [key, value] of Object.entries(row)) {
       if (typeof value === 'string') {
-        // 1. TOUJOURS nettoyer : remplacer \r\n par espace + trim
-        let cleaned = value.replace(/[\r\n]+/g, ' ').trim();
+        // 1. TOUJOURS nettoyer : remplacer \r\n par espace (préserve les espaces début/fin)
+        let cleaned = value.replace(/[\r\n]+/g, ' ');
         
         // 2. Appliquer transformation spécifique si définie dans le mapping
         if (matchedColumns) {
