@@ -87,21 +87,28 @@ function getTransformLabel(transformType: string | undefined): string | null {
 function predictZohoDisplay(value: string, zohoType: string | null | undefined): string {
   if (!value) return '';
   
-  // Pour les dates, Zoho affiche en format "DD Mon, YYYY" ou "DD Mon, YYYY HH:mm:ss"
+  // Pour les dates, Zoho affiche en format "DD Mon, YYYY HH:mm:ss"
   if (zohoType === 'DATE' || zohoType === 'DATE_AS_DATE' || zohoType === 'DATE_TIME') {
-    const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    if (match) {
-      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 
-                      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-      const day = match[3];
-      const month = months[parseInt(match[2], 10) - 1];
-      const year = match[1];
-      
-      if (zohoType === 'DATE' || zohoType === 'DATE_AS_DATE') {
-        return `${day} ${month}, ${year}`;
-      } else {
-        return `${day} ${month}, ${year} 00:00:00`;
-      }
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    
+    // Format ISO date seule : 2025-04-04
+    const dateOnlyMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (dateOnlyMatch) {
+      const day = dateOnlyMatch[3];
+      const month = months[parseInt(dateOnlyMatch[2], 10) - 1];
+      const year = dateOnlyMatch[1];
+      return `${day} ${month}, ${year} 00:00:00`;
+    }
+    
+    // Format ISO datetime : 2025-04-04 23:59:35 ou 2025-04-04T23:59:35
+    const dateTimeMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})$/);
+    if (dateTimeMatch) {
+      const day = dateTimeMatch[3];
+      const month = months[parseInt(dateTimeMatch[2], 10) - 1];
+      const year = dateTimeMatch[1];
+      const time = `${dateTimeMatch[4]}:${dateTimeMatch[5]}:${dateTimeMatch[6]}`;
+      return `${day} ${month}, ${year} ${time}`;
     }
   }
   
