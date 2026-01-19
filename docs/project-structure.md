@@ -1,6 +1,6 @@
 ﻿# Structure du projet - csv-zoho-importer
 
-*Genere le 2026-01-12 06:35:08*
+*Genere le 2026-01-19 09:55:33*
 ```
 csv-zoho-importer/
 |-- .vscode/
@@ -8,6 +8,8 @@ csv-zoho-importer/
 |-- app/
 |   |-- (auth)/
 |   |   |-- login/
+|   |   |   +-- page.tsx
+|   |   |-- reset-password/
 |   |   |   +-- page.tsx
 |   |   +-- layout.tsx
 |   |-- (dashboard)/
@@ -132,6 +134,7 @@ csv-zoho-importer/
 |   |   |   |-- mission-007-complete.md
 |   |   |   |-- mission-007-import-2-phases-rollback.md
 |   |   |   |-- mission-008-dashboard-distribution.md
+|   |   |   |-- mission-009-transform-source-verite.md
 |   |   |   +-- TEMPLATE-MISSION.md
 |   |   |-- base-context.md
 |   |   +-- README.md
@@ -144,6 +147,7 @@ csv-zoho-importer/
 |   |-- architecture-cible-v3.md
 |   |-- doc-session.md
 |   |-- project-structure.md
+|   |-- specs-auth-centralisee.md
 |   |-- specs-fonctionnelles.md
 |   |-- specs-preview-verification.md
 |   |-- specs-profils-import.md
