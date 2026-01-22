@@ -4,8 +4,9 @@
  *
  * Compare les données envoyées à Zoho avec ce qui a été réellement stocké
  * pour détecter les anomalies.
- * 
+ *
  * Sprint 4 - Mission 010 : Support Bulk API async pour grosses tables
+ * Sprint 3 - Mission 012 : Support stratégie RowID pour tables volumineuses
  */
 
 import type {
@@ -16,6 +17,7 @@ import type {
   AnomalyType,
   ComparedRow,
   ComparedColumn,
+  VerificationStrategy,
 } from './types';
 import { createAnomaly, EMPTY_VERIFICATION_RESULT } from './types';
 
@@ -33,6 +35,35 @@ const TRUNCATION_THRESHOLD = 250;
  * Cache pour les noms de tables (évite les appels répétés)
  */
 const tableNameCache = new Map<string, string>();
+
+// ==================== STRATÉGIE (Mission 012) ====================
+
+/**
+ * Détermine la stratégie de vérification selon le mode d'import
+ * - rowid: Pour APPEND, TRUNCATEADD, ONLYADD (lignes nouvelles)
+ * - matching_key: Pour UPDATEADD, DELETEUPSERT (lignes existantes modifiées)
+ */
+export function getVerificationStrategy(
+  config: VerificationConfig
+): VerificationStrategy {
+  // Si explicitement défini, utiliser cette stratégie
+  if (config.verificationStrategy) {
+    return config.verificationStrategy;
+  }
+
+  // Si on a un maxRowIdBeforeImport, on peut utiliser RowID
+  if (config.maxRowIdBeforeImport !== undefined && config.tableName) {
+    // Modes UPDATE nécessitent matching_key car les lignes existantes sont modifiées
+    if (config.mode === 'updateadd' || config.mode === 'deleteupsert') {
+      return 'matching_key';
+    }
+    // Autres modes : RowID est plus performant
+    return 'rowid';
+  }
+
+  // Fallback : matching_key (comportement historique)
+  return 'matching_key';
+}
 
 // ==================== FONCTION PRINCIPALE ====================
 
@@ -63,12 +94,16 @@ export async function verifyImport(
     const delay = config.delayBeforeRead ?? DEFAULT_DELAY_MS;
     await sleep(delay);
 
-    // 2. Trouver la colonne de matching
+    // 2. Déterminer la stratégie
+    const strategy = getVerificationStrategy(config);
+    console.log('[Verification] Strategy:', strategy);
+
+    // 3. Trouver la colonne de matching (toujours utile pour comparer)
     const matchingColumn = config.matchingColumn || findBestMatchingColumn(sentRows);
     console.log('[Verification] Using matching column:', matchingColumn);
 
-    // 3. Récupérer les données depuis Zoho
-    const receivedRows = await fetchRowsFromZoho(sentRows, config, matchingColumn);
+    // 4. Récupérer les données depuis Zoho selon la stratégie
+    const receivedRows = await fetchRowsFromZoho(sentRows, config, matchingColumn, strategy);
 
     if (!receivedRows || receivedRows.length === 0) {
       return {
@@ -86,15 +121,16 @@ export async function verifyImport(
       };
     }
 
-    // 4. Comparer les données et construire le détail
+    // 5. Comparer les données et construire le détail
     const { anomalies, comparedRows } = compareRowsDetailed(
       sentRows,
       receivedRows,
       config,
-      matchingColumn
+      matchingColumn,
+      strategy
     );
 
-    // 5. Construire le résultat
+    // 6. Construire le résultat
     const summary = {
       critical: anomalies.filter((a) => a.level === 'critical').length,
       warning: anomalies.filter((a) => a.level === 'warning').length,
@@ -127,14 +163,54 @@ export async function verifyImport(
 
 /**
  * Récupère les lignes depuis Zoho pour comparaison
- * Utilise l'API Bulk async pour supporter les grosses tables
- * Avec fallback vers l'API synchrone pour les petites tables
+ * Supporte 2 stratégies :
+ * - rowid: Utilise l'API verify-by-rowid (rapide sur grosses tables)
+ * - matching_key: Utilise l'API verify-data avec WHERE IN (comportement existant)
  */
 async function fetchRowsFromZoho(
   sentRows: SentRow[],
   config: VerificationConfig,
-  matchingColumn: string | undefined
+  matchingColumn: string | undefined,
+  strategy: VerificationStrategy
 ): Promise<Record<string, unknown>[]> {
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // STRATÉGIE ROWID (Mission 012) - Pour APPEND, TRUNCATEADD, ONLYADD
+  // ─────────────────────────────────────────────────────────────────────────
+  if (strategy === 'rowid' && config.maxRowIdBeforeImport !== undefined && config.tableName) {
+    console.log('[Verification] Using RowID strategy');
+    console.log('[Verification] maxRowIdBeforeImport:', config.maxRowIdBeforeImport);
+    console.log('[Verification] tableName:', config.tableName);
+
+    try {
+      const params = new URLSearchParams({
+        workspaceId: config.workspaceId,
+        tableName: config.tableName,
+        action: 'getAfter',
+        minRowId: String(config.maxRowIdBeforeImport),
+        limit: String(config.sampleSize * 2),
+      });
+
+      const response = await fetch(`/api/zoho/verify-by-rowid?${params.toString()}`);
+      const result = await response.json();
+
+      if (response.ok && result.success) {
+        console.log('[Verification] RowID strategy returned', result.rowCount, 'rows');
+        return result.data || [];
+      }
+
+      console.warn('[Verification] RowID strategy failed:', result.error);
+      // Fallback vers matching_key
+    } catch (error) {
+      console.warn('[Verification] RowID strategy error:', error);
+      // Fallback vers matching_key
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // STRATÉGIE MATCHING_KEY (comportement existant)
+  // ─────────────────────────────────────────────────────────────────────────
+  console.log('[Verification] Using matching_key strategy');
 
   if (!matchingColumn) {
     console.warn('[Verification] Aucune colonne de matching trouvée, vérification impossible');
@@ -156,7 +232,7 @@ async function fetchRowsFromZoho(
 
   // Essayer d'abord la nouvelle API async (supporte les grosses tables)
   try {
-    const tableName = await getTableNameFromViewId(config.workspaceId, config.viewId);
+    const tableName = config.tableName || await getTableNameFromViewId(config.workspaceId, config.viewId);
 
     if (tableName) {
       console.log('[Verification] Using async API with tableName:', tableName);
@@ -169,7 +245,7 @@ async function fetchRowsFromZoho(
         limit: String(config.sampleSize * 2),
       });
 
-     const response = await fetch(`/api/zoho/verify-data?${params.toString()}`);
+      const response = await fetch(`/api/zoho/verify-data?${params.toString()}`);
       const result = await response.json();
 
       if (response.ok && result.success) {
@@ -304,20 +380,44 @@ function buildInCriteria(column: string, values: string[]): string {
 /**
  * Compare les lignes envoyées avec les lignes reçues
  * Retourne les anomalies ET les données comparatives détaillées
+ * 
+ * Pour la stratégie RowID, les lignes sont matchées par position (ordre d'insertion)
+ * Pour la stratégie matching_key, les lignes sont matchées par valeur de la colonne
  */
 function compareRowsDetailed(
   sentRows: SentRow[],
   receivedRows: Record<string, unknown>[],
   config: VerificationConfig,
-  matchingColumn: string | undefined
+  matchingColumn: string | undefined,
+  strategy: VerificationStrategy
 ): { anomalies: Anomaly[]; comparedRows: ComparedRow[] } {
   const anomalies: Anomaly[] = [];
   const comparedRows: ComparedRow[] = [];
 
-  for (const sentRow of sentRows) {
-    // Trouver la ligne correspondante dans Zoho
-    const receivedRow = findMatchingRow(sentRow, receivedRows, config, matchingColumn);
+  // Pour stratégie RowID, trier les lignes reçues par RowID croissant
+  let sortedReceivedRows = receivedRows;
+  if (strategy === 'rowid') {
+    sortedReceivedRows = [...receivedRows].sort((a, b) => {
+      const rowIdA = Number(a['RowID'] || a['rowId'] || 0);
+      const rowIdB = Number(b['RowID'] || b['rowId'] || 0);
+      return rowIdA - rowIdB;
+    });
+    console.log('[Verification] Sorted received rows by RowID for positional matching');
+  }
+
+  for (let i = 0; i < sentRows.length; i++) {
+    const sentRow = sentRows[i];
+    let receivedRow: Record<string, unknown> | undefined;
     const matchingValue = matchingColumn ? (sentRow.data[matchingColumn] || '') : '';
+
+    // Trouver la ligne correspondante selon la stratégie
+    if (strategy === 'rowid') {
+      // Stratégie RowID : matcher par position (ordre d'insertion)
+      receivedRow = sortedReceivedRows[i];
+    } else {
+      // Stratégie matching_key : matcher par valeur
+      receivedRow = findMatchingRow(sentRow, receivedRows, config, matchingColumn);
+    }
 
     if (!receivedRow) {
       anomalies.push(createAnomaly('row_missing', sentRow.index, '', '', ''));
