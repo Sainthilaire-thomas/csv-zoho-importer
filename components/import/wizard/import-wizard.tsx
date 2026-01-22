@@ -127,6 +127,10 @@ const verificationSampleRef = useRef<SentRow[]>([]);
 // Refs pour accès immédiat aux valeurs de matching (évite le délai du state React)
 const verificationColumnRef = useRef<string | null>(null);
 const testMatchingValuesRef = useRef<string[]>([]);
+// Mission 012 : Stratégie RowID
+const [maxRowIdBeforeTest, setMaxRowIdBeforeTest] = useState<number | null>(null);
+const maxRowIdBeforeTestRef = useRef<number | null>(null);
+const [tableName, setTableName] = useState<string | null>(null);
 
   // Charger les workspaces au montage
   useEffect(() => {
@@ -768,7 +772,7 @@ const executeTestImport = useCallback(async (): Promise<{ success: boolean; erro
     // Prendre l'échantillon
     const sampleData = validData.slice(0, testSampleSize);
 
-    // Construire l'échantillon pour vérification (DÉPLACÉ ICI)
+    // Construire l'échantillon pour vérification
     const sampleRows: SentRow[] = sampleData.map((row, index) => ({
       index: index + 2,
       data: Object.fromEntries(
@@ -804,6 +808,38 @@ const executeTestImport = useCallback(async (): Promise<{ success: boolean; erro
     setVerificationSample(sampleRows);
     verificationSampleRef.current = sampleRows;
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // Mission 012 : Récupérer MAX(RowID) AVANT l'import pour stratégie RowID
+    // ─────────────────────────────────────────────────────────────────────────
+    const currentTableName = state.config.tableName || null;
+    setTableName(currentTableName);
+    
+    if (currentTableName && selectedWorkspaceId) {
+      try {
+        console.log('[TestImport] Fetching MAX(RowID) before import...');
+        const maxResponse = await fetch(
+          `/api/zoho/verify-by-rowid?workspaceId=${selectedWorkspaceId}&tableName=${encodeURIComponent(currentTableName)}&action=getMax`
+        );
+        const maxResult = await maxResponse.json();
+        
+        if (maxResult.success && maxResult.data?.[0]) {
+          const maxRowId = Number(maxResult.data[0].maxRowId || maxResult.data[0].maxrowid || 0);
+          setMaxRowIdBeforeTest(maxRowId);
+          maxRowIdBeforeTestRef.current = maxRowId;
+          console.log('[TestImport] MAX(RowID) before import:', maxRowId);
+        } else {
+          console.warn('[TestImport] Could not get MAX(RowID):', maxResult.error);
+          setMaxRowIdBeforeTest(null);
+          maxRowIdBeforeTestRef.current = null;
+        }
+      } catch (e) {
+        console.warn('[TestImport] Error getting MAX(RowID):', e);
+        setMaxRowIdBeforeTest(null);
+        maxRowIdBeforeTestRef.current = null;
+      }
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     // Convertir en CSV
     const csvData = Papa.unparse(sampleData);
 
@@ -820,7 +856,7 @@ const executeTestImport = useCallback(async (): Promise<{ success: boolean; erro
         fileName: state.config.file?.name,
         totalRows: sampleData.length,
         matchingColumns: matchingColumns.length > 0 ? matchingColumns : undefined,
-        columnTypes: getColumnTypesFromSchema(),  // ← NOUVEAU : Passer les types Zoho
+        columnTypes: getColumnTypesFromSchema(),
       }),
     });
 
@@ -832,13 +868,12 @@ const executeTestImport = useCallback(async (): Promise<{ success: boolean; erro
 
     return { success: true };
   } catch (error) {
-    return { 
-      success: false, 
-      error: error instanceof Error ? error.message : 'Erreur inconnue' 
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Erreur inconnue'
     };
   }
 }, [parsedData, state.config, state.validation, testSampleSize, verificationColumn, selectedWorkspaceId, matchingColumns, selectedProfile, zohoSchema, getColumnTypesFromSchema]);
-
 /**
  * Exécute la vérification après import test
  */
@@ -851,13 +886,16 @@ const executeTestVerification = useCallback(async (): Promise<{ success: boolean
   }
 
   try {
-    const verificationResult = await verifyImport(sampleToVerify, {
+     const verificationResult = await verifyImport(sampleToVerify, {
       mode: state.config.importMode,
-      matchingColumn: verificationColumn || undefined,
+      matchingColumn: verificationColumnRef.current || undefined,
       sampleSize: sampleToVerify.length,
       workspaceId: selectedWorkspaceId,
       viewId: state.config.tableId,
       delayBeforeRead: 2000,
+      // Mission 012 : Support stratégie RowID
+      tableName: tableName || state.config.tableName || undefined,
+      maxRowIdBeforeImport: maxRowIdBeforeTestRef.current ?? undefined,
     });
 
     // Créer le résultat du test
@@ -899,46 +937,84 @@ const handleTestError = useCallback((error: string) => {
 }, [setImportError]);
 
 /**
- * Exécute le rollback
+ * Exécute le rollback - Supporte stratégie RowID et matching_key (Mission 012)
  */
 const handleRollback = useCallback(async (): Promise<RollbackResult> => {
-  // Utiliser les refs pour accès immédiat
-  const column = verificationColumnRef.current;
-  const values = testMatchingValuesRef.current;
-  
-  console.log('[Rollback] Using refs:', { column, values });
-  
-  if (!column || values.length === 0) {
-    return {
-      success: false,
-      deletedRows: 0,
-      duration: 0,
-      errorMessage: 'Pas de données à supprimer',
-      remainingValues: values,
-    };
+  // Déterminer la stratégie selon le mode d'import
+  const mode = state.config.importMode;
+  const useRowIdStrategy = 
+    (mode === 'append' || mode === 'truncateadd' || mode === 'onlyadd') &&
+    maxRowIdBeforeTestRef.current !== null;
+
+  console.log('[Rollback] Strategy:', useRowIdStrategy ? 'rowid' : 'matching_key');
+
+  if (useRowIdStrategy) {
+    // ─────────────────────────────────────────────────────────────────────────
+    // Stratégie RowID : Supprimer les lignes avec RowID > maxRowIdBeforeTest
+    // ─────────────────────────────────────────────────────────────────────────
+    console.log('[Rollback] Using RowID strategy, deleting rows after:', maxRowIdBeforeTestRef.current);
+
+    const result = await executeRollback({
+      workspaceId: selectedWorkspaceId,
+      viewId: state.config.tableId,
+      tableName: tableName || state.config.tableName || undefined,
+      rowIdRange: { min: maxRowIdBeforeTestRef.current! },
+      reason: 'user_cancelled',
+    });
+
+    if (result.success) {
+      toast.success(`${result.deletedRows} lignes supprimées de Zoho`);
+      goToStep('previewing');
+      // Reset les états ET les refs
+      setTestMatchingValues([]);
+      testMatchingValuesRef.current = [];
+      setVerificationSample([]);
+      verificationSampleRef.current = [];
+      setMaxRowIdBeforeTest(null);
+      maxRowIdBeforeTestRef.current = null;
+    }
+
+    return result;
+  } else {
+    // ─────────────────────────────────────────────────────────────────────────
+    // Stratégie matching_key : Comportement existant
+    // ─────────────────────────────────────────────────────────────────────────
+    const column = verificationColumnRef.current;
+    const values = testMatchingValuesRef.current;
+
+    console.log('[Rollback] Using matching_key strategy:', { column, values });
+
+    if (!column || values.length === 0) {
+      return {
+        success: false,
+        deletedRows: 0,
+        duration: 0,
+        errorMessage: 'Pas de données à supprimer',
+        remainingValues: values,
+      };
+    }
+
+    const result = await executeRollback({
+      workspaceId: selectedWorkspaceId,
+      viewId: state.config.tableId,
+      matchingColumn: column,
+      matchingValues: values,
+      reason: 'user_cancelled',
+    });
+
+    if (result.success) {
+      toast.success(`${result.deletedRows} lignes supprimées de Zoho`);
+      goToStep('previewing');
+      // Reset les états ET les refs
+      setTestMatchingValues([]);
+      testMatchingValuesRef.current = [];
+      setVerificationSample([]);
+      verificationSampleRef.current = [];
+    }
+
+    return result;
   }
-
-  const result = await executeRollback({
-    workspaceId: selectedWorkspaceId,
-    viewId: state.config.tableId,
-    matchingColumn: column,
-    matchingValues: values,
-    reason: 'user_cancelled',
-  });
-
-  if (result.success) {
-     toast.success(`${result.deletedRows} lignes supprimées de Zoho`);
-    // Retour à l'étape de preview pour corriger
-    goToStep('previewing');
-    // Reset les états ET les refs
-    setTestMatchingValues([]);
-    testMatchingValuesRef.current = [];
-    setVerificationSample([]);
-    verificationSampleRef.current = [];
-  }
-
-  return result;
-}, [selectedWorkspaceId, state.config.tableId, goToStep]);
+}, [selectedWorkspaceId, state.config.tableId, state.config.tableName, state.config.importMode, tableName, goToStep]);
 
 /**
  * Confirme l'import complet après test réussi - VERSION CHUNKING
