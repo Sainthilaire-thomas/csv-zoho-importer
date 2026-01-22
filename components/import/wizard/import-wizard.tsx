@@ -1231,7 +1231,7 @@ const handleConfirmFullImport = useCallback(async () => {
     const duration = Date.now() - startTime;
     console.log(`[Import] Terminé: ${totalImported} lignes en ${duration}ms (${totalChunks} chunks)`);
 
-    // Sauvegarder/mettre à jour le profil
+   // Sauvegarder/mettre à jour le profil
     if (profileMode !== 'skip') {
       try {
         await saveOrUpdateProfile();
@@ -1240,27 +1240,17 @@ const handleConfirmFullImport = useCallback(async () => {
       }
     }
 
-    // ==================== NOUVEAU: Logger l'import ====================
-    let maxRowIdAfter: number | null = null;
-    
-    // Récupérer MAX(RowID) après import pour le rollback différé
-    if (state.config.tableName && selectedWorkspaceId) {
-      try {
-        const maxRowIdResponse = await fetch(
-          `/api/zoho/verify-by-rowid?workspaceId=${selectedWorkspaceId}&tableName=${encodeURIComponent(state.config.tableName)}&action=getMax`
-        );
-        if (maxRowIdResponse.ok) {
-          const maxRowIdData = await maxRowIdResponse.json();
-          maxRowIdAfter = maxRowIdData.maxRowId;
-          console.log('[Import] MAX(RowID) after import:', maxRowIdAfter);
-        }
-      } catch (error) {
-        console.warn('[Import] Impossible de récupérer MAX(RowID) après import:', error);
-      }
-    }
-
     // Logger l'import dans l'historique
     const totalRowsImported = testSampleSize + totalImported;
+
+    // Mission 013 : Calculer maxRowIdAfter à partir du RowID de début + nombre de lignes
+    // (évite l'appel API getMax qui timeout sur grosses tables)
+    let maxRowIdAfter: number | null = null;
+    if (rowIdStartForImportRef.current !== null) {
+      maxRowIdAfter = calculateEndRowId(rowIdStartForImportRef.current, totalRowsImported);
+      console.log('[Import] Calculated MAX(RowID) after import:', maxRowIdAfter);
+    }
+
     try {
       await fetch('/api/imports', {
         method: 'POST',
