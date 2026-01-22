@@ -1,6 +1,6 @@
 ﻿# Structure du projet - csv-zoho-importer
 
-*Genere le 2026-01-19 15:40:43*
+*Genere le 2026-01-22 19:07:36*
 ```
 csv-zoho-importer/
 |-- .vscode/
@@ -33,10 +33,14 @@ csv-zoho-importer/
 |   |   |   +-- validate/
 |   |   |       +-- route.ts
 |   |   |-- imports/
+|   |   |   |-- [id]/
+|   |   |   +-- route.ts
 |   |   |-- profiles/
 |   |   |   |-- [id]/
 |   |   |   |-- match/
 |   |   |   |   +-- route.ts
+|   |   |   +-- route.ts
+|   |   |-- rowid-sync/
 |   |   |   +-- route.ts
 |   |   |-- rules/
 |   |   +-- zoho/
@@ -71,6 +75,8 @@ csv-zoho-importer/
 |   |       |   +-- route.ts
 |   |       |-- test-private-url/
 |   |       |   +-- route.ts
+|   |       |-- verify-by-rowid/
+|   |       |   +-- route.ts
 |   |       |-- verify-data/
 |   |       |   +-- route.ts
 |   |       +-- workspaces/
@@ -80,6 +86,11 @@ csv-zoho-importer/
 |   |-- layout.tsx
 |   +-- page.tsx
 |-- components/
+|   |-- history/
+|   |   |-- import-card.tsx
+|   |   |-- import-list.tsx
+|   |   |-- index.ts
+|   |   +-- rollback-dialog.tsx
 |   |-- import/
 |   |   |-- wizard/
 |   |   |   |-- import-wizard.tsx
@@ -99,6 +110,7 @@ csv-zoho-importer/
 |   |   |   +-- wizard-progress.tsx
 |   |   |-- file-upload.tsx
 |   |   |-- profile-edit-dialog.tsx
+|   |   |-- rowid-sync-dialog.tsx
 |   |   |-- table-selector.tsx
 |   |   |-- table-selector-accordion.tsx
 |   |   |-- transformation-preview.tsx
@@ -126,7 +138,8 @@ csv-zoho-importer/
 |   |-- ai-context/
 |   |   |-- missions/
 |   |   |   |-- image/
-|   |   |   |   +-- mission-005-profils-import/
+|   |   |   |   |-- mission-005-profils-import/
+|   |   |   |   +-- mission-013-historique-rollback-v2/
 |   |   |   |-- mission-001-setup-initial.md
 |   |   |   |-- mission-002-wizard-import.md
 |   |   |   |-- mission-003-api-zoho.md
@@ -141,6 +154,10 @@ csv-zoho-importer/
 |   |   |   |-- mission-009-transform-source-verite.md
 |   |   |   |-- mission-010-ux-transformation-verification.md
 |   |   |   |-- mission-011-import-chunks.md
+|   |   |   |-- mission-012-verification-rowid.md
+|   |   |   |-- mission-013-historique-rollback.md
+|   |   |   |-- mission-013-historique-rollback-v2.md
+|   |   |   |-- mission-013-historique-rollback-v3.md
 |   |   |   +-- TEMPLATE-MISSION.md
 |   |   |-- base-context.md
 |   |   +-- README.md
@@ -148,7 +165,9 @@ csv-zoho-importer/
 |   |   +-- specs-fonctionnelles/
 |   |       +-- 1764570677131.png
 |   |-- sql/
-|   |   +-- 002-user-zoho-tokens.sql
+|   |   |-- 002-user-zoho-tokens.sql
+|   |   |-- 003-import-history-rollback.sql
+|   |   +-- 004-rowid-sync.sql
 |   |-- architecture-cible.md
 |   |-- architecture-cible-v3.md
 |   |-- doc-session.md
@@ -165,12 +184,20 @@ csv-zoho-importer/
 |   |   |   |-- index.ts
 |   |   |   +-- type-detector.ts
 |   |   |-- file-provider/
+|   |   |-- history/
+|   |   |   |-- index.ts
+|   |   |   +-- rollback-rules.ts
 |   |   |-- profile/
 |   |   |   |-- index.ts
 |   |   |   +-- profile-manager.ts
 |   |   |-- rollback/
 |   |   |   |-- index.ts
 |   |   |   |-- rollback-service.ts
+|   |   |   +-- types.ts
+|   |   |-- rowid-sync/
+|   |   |   |-- index.ts
+|   |   |   |-- probe-service.ts
+|   |   |   |-- sync-service.ts
 |   |   |   +-- types.ts
 |   |   |-- transformation/
 |   |   |   |-- index.ts
@@ -221,6 +248,7 @@ csv-zoho-importer/
 |-- scripts/
 |   +-- generate-tree.ps1
 |-- types/
+|   |-- imports.ts
 |   |-- index.ts
 |   +-- profiles.ts
 |-- .env.local

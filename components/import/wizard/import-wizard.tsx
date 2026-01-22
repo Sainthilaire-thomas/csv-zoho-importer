@@ -35,6 +35,10 @@ import type { SchemaValidationResult, ZohoTableSchema, ResolvableIssue } from '@
 import type { ImportProfile, ProfileMatchResult, DetectedColumn } from '@/types/profiles';
 import Papa from 'papaparse';
 import { toast } from 'sonner';
+// Mission 013 : RowID Sync
+import { checkSyncBeforeImport, updateSyncAfterImport, calculateEndRowId } from '@/lib/domain/rowid-sync';
+import { RowIdSyncDialog } from '@/components/import/rowid-sync-dialog';
+import type { PreImportCheckResult } from '@/lib/domain/rowid-sync/types';
 
 // ==================== CONSTANTES CHUNKING ====================
 const CHUNK_SIZE = 5000;  // Lignes par chunk (~ 1-2MB selon les données)
@@ -131,7 +135,11 @@ const testMatchingValuesRef = useRef<string[]>([]);
 const [maxRowIdBeforeTest, setMaxRowIdBeforeTest] = useState<number | null>(null);
 const maxRowIdBeforeTestRef = useRef<number | null>(null);
 const [tableName, setTableName] = useState<string | null>(null);
-
+// Mission 013 : États pour la synchronisation RowID
+const [rowIdSyncCheck, setRowIdSyncCheck] = useState<PreImportCheckResult | null>(null);
+const [showRowIdSyncDialog, setShowRowIdSyncDialog] = useState(false);
+const [rowIdStartForImport, setRowIdStartForImport] = useState<number | null>(null);
+const rowIdStartForImportRef = useRef<number | null>(null);
   // Charger les workspaces au montage
   useEffect(() => {
     async function fetchWorkspaces() {
@@ -736,9 +744,56 @@ console.log('[Wizard] issuesResolved:', issuesResolved);
 
 /**
  * Prépare et lance l'import test
+ * Mission 013 : Vérifie la synchronisation RowID avant de lancer
  */
 const handleStartTestImport = useCallback(async () => {
   if (!parsedData || !state.config.tableId || !state.validation) return;
+
+  const currentTableName = state.config.tableName;
+  
+  // ─────────────────────────────────────────────────────────────────────────
+  // Mission 013 : Vérifier la synchronisation RowID avant l'import
+  // ─────────────────────────────────────────────────────────────────────────
+  if (currentTableName && selectedWorkspaceId) {
+    try {
+      console.log('[TestImport] Checking RowID sync...');
+      const syncCheck = await checkSyncBeforeImport(
+        state.config.tableId,
+        currentTableName,
+        selectedWorkspaceId
+      );
+      
+      setRowIdSyncCheck(syncCheck);
+      console.log('[TestImport] Sync check result:', syncCheck);
+
+      if (syncCheck.needsResync) {
+        // Afficher le dialog de resync
+        setShowRowIdSyncDialog(true);
+        return; // Ne pas continuer tant que l'utilisateur n'a pas resync
+      }
+
+      // Utiliser le RowID de début (recalé si nécessaire)
+      const startRowId = syncCheck.actualStartRowId ?? syncCheck.estimatedStartRowId;
+      setRowIdStartForImport(startRowId);
+      rowIdStartForImportRef.current = startRowId;
+      
+      // Aussi mettre à jour maxRowIdBeforeTest pour compatibilité
+      setMaxRowIdBeforeTest(startRowId - 1);
+      maxRowIdBeforeTestRef.current = startRowId - 1;
+      
+      console.log('[TestImport] RowID start for import:', startRowId);
+      
+      if (syncCheck.message && syncCheck.message !== 'Synchronisation OK') {
+        toast.info(syncCheck.message);
+      }
+    } catch (error) {
+      console.warn('[TestImport] Sync check failed, continuing without RowID tracking:', error);
+      // Continuer sans tracking RowID (fallback)
+      setRowIdStartForImport(null);
+      rowIdStartForImportRef.current = null;
+    }
+  }
+  // ─────────────────────────────────────────────────────────────────────────
 
   // Détecter la colonne de matching si pas encore fait
   if (!verificationColumn && verificationSample.length > 0) {
@@ -748,11 +803,62 @@ const handleStartTestImport = useCallback(async () => {
     });
     setMatchingColumnResult(result);
     setVerificationColumn(result.column || null);
-verificationColumnRef.current = result.column || null;  // Stockage immédiat
+    verificationColumnRef.current = result.column || null;
   }
 
   startTestImport();
-}, [parsedData, state.config.tableId, state.validation, verificationColumn, verificationSample, selectedProfile, zohoSchema, startTestImport]);
+}, [parsedData, state.config.tableId, state.config.tableName, state.validation, verificationColumn, verificationSample, selectedProfile, zohoSchema, startTestImport, selectedWorkspaceId]);
+
+/**
+ * Mission 013 : Callback après resynchronisation manuelle
+ */
+const handleRowIdResync = useCallback(async (rowId: number) => {
+  if (!state.config.tableId || !state.config.tableName || !selectedWorkspaceId) {
+    throw new Error('Configuration manquante');
+  }
+
+  // Sauvegarder la resync dans Supabase
+  await updateSyncAfterImport({
+    zohoTableId: state.config.tableId,
+    tableName: state.config.tableName,
+    workspaceId: selectedWorkspaceId,
+    lastKnownRowid: rowId,
+    source: 'manual',
+  });
+
+  // Mettre à jour les états locaux
+  const startRowId = rowId + 1;
+  setRowIdStartForImport(startRowId);
+  rowIdStartForImportRef.current = startRowId;
+  setMaxRowIdBeforeTest(rowId);
+  maxRowIdBeforeTestRef.current = rowId;
+  
+  setShowRowIdSyncDialog(false);
+  toast.success('Synchronisation effectuée');
+
+  // Continuer avec l'import test
+  if (!verificationColumn && verificationSample.length > 0) {
+    const result = findBestMatchingColumnEnhanced(verificationSample, {
+      profile: selectedProfile || undefined,
+      zohoSchema: zohoSchema?.columns,
+    });
+    setMatchingColumnResult(result);
+    setVerificationColumn(result.column || null);
+    verificationColumnRef.current = result.column || null;
+  }
+
+  startTestImport();
+}, [state.config.tableId, state.config.tableName, selectedWorkspaceId, verificationColumn, verificationSample, selectedProfile, zohoSchema, startTestImport]);
+
+/**
+ * Mission 013 : Annulation du dialog de resync
+ */
+const handleRowIdResyncCancel = useCallback(() => {
+  setShowRowIdSyncDialog(false);
+  toast.info('Import annulé');
+}, []);
+
+
 
 /**
  * Exécute l'import de l'échantillon test
@@ -808,36 +914,16 @@ const executeTestImport = useCallback(async (): Promise<{ success: boolean; erro
     setVerificationSample(sampleRows);
     verificationSampleRef.current = sampleRows;
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Mission 012 : Récupérer MAX(RowID) AVANT l'import pour stratégie RowID
+  // ─────────────────────────────────────────────────────────────────────────
+    // Mission 013 : Le RowID de début a déjà été calculé dans handleStartTestImport
+    // via checkSyncBeforeImport (sondage rapide au lieu de MAX coûteux)
     // ─────────────────────────────────────────────────────────────────────────
     const currentTableName = state.config.tableName || null;
     setTableName(currentTableName);
     
-    if (currentTableName && selectedWorkspaceId) {
-      try {
-        console.log('[TestImport] Fetching MAX(RowID) before import...');
-        const maxResponse = await fetch(
-          `/api/zoho/verify-by-rowid?workspaceId=${selectedWorkspaceId}&tableName=${encodeURIComponent(currentTableName)}&action=getMax`
-        );
-        const maxResult = await maxResponse.json();
-        
-        if (maxResult.success && maxResult.data?.[0]) {
-          const maxRowId = Number(maxResult.data[0].maxRowId || maxResult.data[0].maxrowid || 0);
-          setMaxRowIdBeforeTest(maxRowId);
-          maxRowIdBeforeTestRef.current = maxRowId;
-          console.log('[TestImport] MAX(RowID) before import:', maxRowId);
-        } else {
-          console.warn('[TestImport] Could not get MAX(RowID):', maxResult.error);
-          setMaxRowIdBeforeTest(null);
-          maxRowIdBeforeTestRef.current = null;
-        }
-      } catch (e) {
-        console.warn('[TestImport] Error getting MAX(RowID):', e);
-        setMaxRowIdBeforeTest(null);
-        maxRowIdBeforeTestRef.current = null;
-      }
-    }
+    // Les valeurs maxRowIdBeforeTest sont déjà définies par handleStartTestImport
+    console.log('[TestImport] Using pre-calculated RowID start:', rowIdStartForImportRef.current);
+
     // ─────────────────────────────────────────────────────────────────────────
 
     // Convertir en CSV
@@ -1139,6 +1225,7 @@ const handleConfirmFullImport = useCallback(async () => {
         },
       });
     }
+
     // ==================== FIN CHUNKING ====================
 
     const duration = Date.now() - startTime;
@@ -1153,10 +1240,85 @@ const handleConfirmFullImport = useCallback(async () => {
       }
     }
 
+    // ==================== NOUVEAU: Logger l'import ====================
+    let maxRowIdAfter: number | null = null;
+    
+    // Récupérer MAX(RowID) après import pour le rollback différé
+    if (state.config.tableName && selectedWorkspaceId) {
+      try {
+        const maxRowIdResponse = await fetch(
+          `/api/zoho/verify-by-rowid?workspaceId=${selectedWorkspaceId}&tableName=${encodeURIComponent(state.config.tableName)}&action=getMax`
+        );
+        if (maxRowIdResponse.ok) {
+          const maxRowIdData = await maxRowIdResponse.json();
+          maxRowIdAfter = maxRowIdData.maxRowId;
+          console.log('[Import] MAX(RowID) after import:', maxRowIdAfter);
+        }
+      } catch (error) {
+        console.warn('[Import] Impossible de récupérer MAX(RowID) après import:', error);
+      }
+    }
+
+    // Logger l'import dans l'historique
+    const totalRowsImported = testSampleSize + totalImported;
+    try {
+      await fetch('/api/imports', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workspaceId: selectedWorkspaceId,
+          viewId: state.config.tableId,
+          tableName: state.config.tableName,
+          importMode: state.config.importMode,
+          fileName: state.config.file?.name || 'unknown',
+          fileSizeBytes: state.config.file?.size,
+          rowsTotal: parsedData?.length || 0,
+          rowsValid: state.validation?.validRows || 0,
+          rowsImported: totalRowsImported,
+rowsErrors: state.validation?.errorRows || 0,
+          rowIdBefore: maxRowIdBeforeTestRef.current,
+          rowIdAfter: maxRowIdAfter,
+          matchingColumn: verificationColumnRef.current,
+          chunksCount: totalChunks + 1,
+          durationMs: duration,
+          status: 'success',
+          profileId: selectedProfile?.id,
+        }),
+      });
+      console.log('[Import] Log enregistré dans l\'historique');
+      // ==================== Mission 013: Mettre à jour table_rowid_sync ====================
+      if (state.config.tableId && state.config.tableName && selectedWorkspaceId) {
+        const rowsImportedInFullImport = totalImported; // Sans le test (déjà compté)
+        const totalRowsForSync = testSampleSize + rowsImportedInFullImport;
+        
+        // Calculer le RowID de fin
+        if (rowIdStartForImportRef.current !== null) {
+          const endRowId = calculateEndRowId(rowIdStartForImportRef.current, totalRowsForSync);
+          
+          try {
+            await updateSyncAfterImport({
+              zohoTableId: state.config.tableId,
+              tableName: state.config.tableName,
+              workspaceId: selectedWorkspaceId,
+              lastKnownRowid: endRowId,
+              source: 'import',
+            });
+            console.log('[Import] RowID sync updated:', endRowId);
+          } catch (syncError) {
+            console.warn('[Import] Failed to update RowID sync (non-blocking):', syncError);
+          }
+        }
+      }
+      // ==================== FIN Mission 013 ====================
+    } catch (logError) {
+      console.warn('[Import] Erreur logging (non bloquant):', logError);
+    }
+    // ==================== FIN NOUVEAU ====================
+
     setImportSuccess({
       success: true,
       importId: `imp_${Date.now()}`,
-      rowsImported: testSampleSize + totalImported,
+      rowsImported: totalRowsImported,
       duration,
       verification: state.testResult?.verification,
     });
@@ -1198,6 +1360,7 @@ const handleConfirmFullImport = useCallback(async () => {
   setImportSuccess,
   setImportError,
   getColumnTypesFromSchema,
+  selectedProfile,
 ]);
 
 /**
@@ -1430,7 +1593,21 @@ const handleForceImport = useCallback(() => {
       {!['success', 'error'].includes(state.status) && (
         <WizardProgress currentStatus={state.status} isResolving={hasUnresolvedIssues} />
       )}
-      {renderStep()}
+
+      {/* Mission 013 : Dialog de resynchronisation RowID */}
+      {showRowIdSyncDialog && state.config.tableName && (
+        <RowIdSyncDialog
+          tableName={state.config.tableName}
+          workspaceId={selectedWorkspaceId}
+          zohoTableId={state.config.tableId || ''}
+          estimatedRowId={rowIdSyncCheck?.estimatedStartRowId ? rowIdSyncCheck.estimatedStartRowId - 1 : undefined}
+          message={rowIdSyncCheck?.message || 'Synchronisation requise'}
+          onSync={handleRowIdResync}
+          onCancel={handleRowIdResyncCancel}
+        />
+      )}
+
+      {!showRowIdSyncDialog && renderStep()}
     </div>
   );
 }

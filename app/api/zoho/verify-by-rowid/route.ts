@@ -188,22 +188,21 @@ export async function GET(request: NextRequest) {
     const headers = {
       'Authorization': `Zoho-oauthtoken ${tokens.accessToken}`,
       'ZANALYTICS-ORGID': tokens.orgId || '',
-      'Content-Type': 'application/x-www-form-urlencoded',
     };
 
     // 4. Créer un job d'export async (pour supporter les grosses tables)
-    const createJobUrl = `${apiDomain}/restapi/v2/bulk/workspaces/${workspaceId}/data/query`;
     const jobConfig = {
       responseFormat: 'csv',
       sqlQuery: sqlQuery,
     };
+    const configEncoded = encodeURIComponent(JSON.stringify(jobConfig));
+    const createJobUrl = `${apiDomain}/restapi/v2/bulk/workspaces/${workspaceId}/data?CONFIG=${configEncoded}`;
 
     console.log('[VerifyByRowID] Creating async job...');
-    
+
     const createResponse = await fetch(createJobUrl, {
-      method: 'POST',
+      method: 'GET',
       headers,
-      body: `CONFIG=${encodeURIComponent(JSON.stringify(jobConfig))}`,
     });
 
     const createResult = await createResponse.json();
