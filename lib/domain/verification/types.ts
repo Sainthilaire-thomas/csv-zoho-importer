@@ -8,6 +8,13 @@ import type { ImportMode } from '@/types';
 // ==================== CONFIGURATION ====================
 
 /**
+ * Stratégie de vérification post-import
+ * - rowid: Utilise RowID pour récupérer les nouvelles lignes (APPEND, TRUNCATEADD, ONLYADD)
+ * - matching_key: Utilise la clé métier pour retrouver les lignes (UPDATEADD, DELETEUPSERT)
+ */
+export type VerificationStrategy = 'rowid' | 'matching_key';
+
+/**
  * Configuration pour la vérification post-import
  */
 export interface VerificationConfig {
@@ -23,6 +30,17 @@ export interface VerificationConfig {
   viewId: string;
   /** Délai avant lecture (ms) pour laisser Zoho indexer */
   delayBeforeRead?: number;
+  
+  // ─────────────────────────────────────────────────────────────────────────
+  // Mission 012 : Stratégie RowID pour tables volumineuses
+  // ─────────────────────────────────────────────────────────────────────────
+  
+  /** Nom de la table Zoho (pour requêtes SQL avec RowID) */
+  tableName?: string;
+  /** RowID maximum AVANT l'import (pour récupérer uniquement les nouvelles lignes) */
+  maxRowIdBeforeImport?: number;
+  /** Stratégie de vérification : 'rowid' (défaut pour APPEND) ou 'matching_key' (pour UPDATE) */
+  verificationStrategy?: VerificationStrategy;
 }
 
 // ==================== DONNÉES ====================
