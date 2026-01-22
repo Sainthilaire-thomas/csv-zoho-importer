@@ -1,22 +1,48 @@
 /**
  * @file lib/domain/rollback/rollback-service.ts
  * @description Service de rollback pour annuler un import test
+ * 
+ * Mission 012 : Support dual stratégie RowID et matching_key
  */
 
-import type { RollbackConfig, RollbackResult, RollbackLog } from './types';
+import type { RollbackConfig, RollbackResult, RollbackLog, RollbackStrategy } from './types';
+
+/**
+ * Détermine la stratégie de rollback à utiliser selon la config
+ */
+function getRollbackStrategy(config: RollbackConfig): RollbackStrategy {
+  if (config.rowIdRange) return 'rowid_range';
+  if (config.rowIds && config.rowIds.length > 0) return 'rowid_list';
+  if (config.matchingColumn && config.matchingValues?.length) return 'matching_key';
+  throw new Error('Configuration de rollback invalide: aucune stratégie applicable');
+}
 
 /**
  * Exécute un rollback en supprimant les lignes importées lors du test
+ * Supporte 2 stratégies : matching_key (existante) et rowid (nouvelle)
  */
 export async function executeRollback(config: RollbackConfig): Promise<RollbackResult> {
   const startTime = Date.now();
-
+  
   try {
-    console.log('[Rollback] Starting rollback for', config.matchingValues.length, 'rows');
-    console.log('[Rollback] Matching column:', config.matchingColumn);
-    console.log('[Rollback] Values:', config.matchingValues);
+    const strategy = getRollbackStrategy(config);
+    console.log('[Rollback] Strategy:', strategy);
 
-    // Appeler l'API de suppression
+    // Log selon la stratégie
+    if (strategy === 'matching_key') {
+      console.log('[Rollback] Matching column:', config.matchingColumn);
+      console.log('[Rollback] Values count:', config.matchingValues?.length);
+      console.log('[Rollback] Values:', config.matchingValues);
+    } else if (strategy === 'rowid_range') {
+      console.log('[Rollback] RowID range: >', config.rowIdRange?.min);
+      if (config.rowIdRange?.max) {
+        console.log('[Rollback] RowID max:', config.rowIdRange.max);
+      }
+    } else if (strategy === 'rowid_list') {
+      console.log('[Rollback] RowIDs to delete:', config.rowIds);
+    }
+
+    // Appeler l'API de suppression avec les paramètres appropriés
     const response = await fetch('/api/zoho/delete', {
       method: 'DELETE',
       headers: {
@@ -25,8 +51,13 @@ export async function executeRollback(config: RollbackConfig): Promise<RollbackR
       body: JSON.stringify({
         workspaceId: config.workspaceId,
         viewId: config.viewId,
+        tableName: config.tableName,
+        // Stratégie matching_key
         matchingColumn: config.matchingColumn,
         matchingValues: config.matchingValues,
+        // Stratégie rowid
+        rowIdRange: config.rowIdRange,
+        rowIds: config.rowIds,
       }),
     });
 
@@ -37,8 +68,10 @@ export async function executeRollback(config: RollbackConfig): Promise<RollbackR
         success: false,
         deletedRows: 0,
         duration: Date.now() - startTime,
+        strategyUsed: strategy,
         errorMessage: result.error || 'Erreur lors du rollback',
-        remainingValues: config.matchingValues,
+        remainingValues: strategy === 'matching_key' ? config.matchingValues : undefined,
+        remainingRowIds: strategy === 'rowid_list' ? config.rowIds : undefined,
       };
     }
 
@@ -46,17 +79,28 @@ export async function executeRollback(config: RollbackConfig): Promise<RollbackR
       success: true,
       deletedRows: result.deletedRows,
       duration: Date.now() - startTime,
+      strategyUsed: strategy,
     };
 
   } catch (error) {
     console.error('[Rollback] Error:', error);
+    
+    // Déterminer la stratégie pour le rapport d'erreur
+    let strategy: RollbackStrategy = 'matching_key';
+    try {
+      strategy = getRollbackStrategy(config);
+    } catch {
+      // Ignore
+    }
 
     return {
       success: false,
       deletedRows: 0,
       duration: Date.now() - startTime,
+      strategyUsed: strategy,
       errorMessage: error instanceof Error ? error.message : 'Erreur inconnue',
       remainingValues: config.matchingValues,
+      remainingRowIds: config.rowIds,
     };
   }
 }
@@ -84,11 +128,19 @@ export function createRollbackLog(
   config: RollbackConfig,
   result: RollbackResult
 ): RollbackLog {
+  const strategy = result.strategyUsed || 'matching_key';
+  
   return {
     workspaceId: config.workspaceId,
     viewId: config.viewId,
+    strategyUsed: strategy,
+    // Matching key
     matchingColumn: config.matchingColumn,
     matchingValues: config.matchingValues,
+    // RowID
+    rowIdRange: config.rowIdRange,
+    rowIds: config.rowIds,
+    // Résultat
     rowsDeleted: result.deletedRows,
     reason: config.reason,
     success: result.success,
