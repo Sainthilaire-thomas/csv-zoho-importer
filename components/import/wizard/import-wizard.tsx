@@ -144,7 +144,10 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
       importMode: state.config.importMode,
       file: state.config.file,
     },
-    workspaceId: wizardState.workspaces.selectedId,
+     workspaceId: wizardState.workspaces.selectedId,
+      workspaceName: wizardState.workspaces.workspaces.find(
+        w => w.id === wizardState.workspaces.selectedId
+      )?.name || '',
     matchingColumns: wizardState.profile.matchingColumns,
     selectedProfile: wizardState.profile.selectedProfile,
     zohoColumns: wizardState.schema.zohoSchema?.columns,
@@ -174,6 +177,9 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
       file: state.config.file,
     },
     workspaceId: wizardState.workspaces.selectedId,
+      workspaceName: wizardState.workspaces.workspaces.find(
+        w => w.id === wizardState.workspaces.selectedId
+      )?.name || '',
     matchingColumns: wizardState.profile.matchingColumns,
     getColumnTypesFromSchema,
     saveOrUpdateProfile: profileActions.saveOrUpdateProfile,
@@ -643,18 +649,19 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
       {/* Mission 013 : Dialog de resynchronisation RowID */}
       {wizardState.rowId.showSyncDialog && state.config.tableName && (
         <RowIdSyncDialog
-          tableName={state.config.tableName}
-          workspaceId={wizardState.workspaces.selectedId}
-          zohoTableId={state.config.tableId || ''}
-          estimatedRowId={
-            wizardState.rowId.syncCheck?.estimatedStartRowId
-              ? wizardState.rowId.syncCheck.estimatedStartRowId - 1
-              : undefined
-          }
-          message={wizardState.rowId.syncCheck?.message || 'Synchronisation requise'}
-          onSync={testImportActions.handleRowIdResync}
-          onCancel={testImportActions.handleRowIdResyncCancel}
-        />
+            tableName={state.config.tableName}
+            workspaceId={wizardState.workspaces.selectedId}
+            zohoTableId={state.config.tableId || ''}
+            estimatedRowId={
+              wizardState.rowId.syncCheck?.estimatedStartRowId
+                ? wizardState.rowId.syncCheck.estimatedStartRowId - 1
+                : undefined
+            }
+            detectedRealRowId={wizardState.rowId.syncCheck?.detectedRealRowId}
+            message={wizardState.rowId.syncCheck?.message || 'Synchronisation requise'}
+            onSync={testImportActions.handleRowIdResync}
+            onCancel={testImportActions.handleRowIdResyncCancel}
+          />
       )}
 
       {!wizardState.rowId.showSyncDialog && renderStep()}

@@ -73,6 +73,8 @@ export interface PreImportCheckResult {
   message: string;
   /** Détails du sondage */
   probeResult?: RowIdProbeResult;
+  /** RowID réel détecté depuis Zoho (pour affichage dans le dialogue) */
+  detectedRealRowId?: number;
 }
 
 /**

@@ -1,17 +1,13 @@
 /**
  * @file app/api/zoho/verify-by-rowid/route.ts
- * @description API pour vérification post-import via RowID (tables volumineuses)
+ * @description API pour récupérer le MAX RowID et vérification via RowID
  *
- * Utilise l'API Bulk async de Zoho pour supporter les grosses tables (2M+ lignes)
+ * Actions supportées :
+ * - getLastRowId : Récupère le dernier RowID via API v1 CloudSQL (SYNCHRONE ~2s)
+ * - getAfter : Récupère les lignes avec RowID > minRowId (Bulk Async)
+ * - getMaxAfter : Récupère le MAX(RowID) après un minRowId (Bulk Async)
  *
- * Action supportée :
- * - getAfter : Récupère les lignes avec RowID > minRowId
- *
- * Actions supprimées :
- * - getMax : timeout sur grosses tables (remplacé par probe-service)
- * - getLatest : non utilisé
- *
- * @mission 012
+ * @mission 012, 013
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -39,7 +35,7 @@ function parseZohoCSV(csvText: string): Record<string, string>[] {
 
   const headers = parseCSVLine(lines[0]);
   const rows: Record<string, string>[] = [];
-  
+
   for (let i = 1; i < lines.length; i++) {
     const values = parseCSVLine(lines[i]);
     if (values.length === headers.length) {
@@ -80,49 +76,118 @@ function parseCSVLine(line: string): string[] {
 }
 
 /**
- * Attend la fin d'un job async et récupère les données
+ * Attend la fin d'un job async et récupère les données (pour getAfter et getMaxAfter)
  */
 async function waitForJobAndDownload(
   apiDomain: string,
   workspaceId: string,
   jobId: string,
   headers: Record<string, string>,
-  maxPolls: number = 30,
-  pollInterval: number = 1000
+  maxPolls: number = 10,
+  pollInterval: number = 500
 ): Promise<{ success: boolean; data?: Record<string, string>[]; error?: string }> {
-  
+
   for (let poll = 1; poll <= maxPolls; poll++) {
-    console.log(`[VerifyByRowID] Poll ${poll} - checking job status...`);
-    
+    console.log(`[VerifyByRowID] Poll ${poll}/${maxPolls} - checking job status...`);
+
     const statusUrl = `${apiDomain}/restapi/v2/bulk/workspaces/${workspaceId}/exportjobs/${jobId}`;
     const statusResponse = await fetch(statusUrl, { method: 'GET', headers });
     const statusData = await statusResponse.json();
-    
+
     const jobCode = statusData.data?.jobCode;
     console.log(`[VerifyByRowID] Poll ${poll} - jobCode: ${jobCode}`);
-    
-    if (jobCode === 3010) {
-      // Job completed - download data
+
+    if (jobCode === 1004 || jobCode === '1004') {
       console.log('[VerifyByRowID] Job completed, downloading data...');
       const downloadUrl = `${apiDomain}/restapi/v2/bulk/workspaces/${workspaceId}/exportjobs/${jobId}/data`;
       const downloadResponse = await fetch(downloadUrl, { method: 'GET', headers });
       const csvText = await downloadResponse.text();
-      
+
       const data = parseZohoCSV(csvText);
       console.log('[VerifyByRowID] Downloaded', data.length, 'rows');
       return { success: true, data };
     }
-    
-    if (jobCode === 3011 || jobCode === 3012) {
-      // Job failed
+
+    if (jobCode === 1003 || jobCode === '1003') {
       return { success: false, error: `Job failed with code ${jobCode}` };
     }
-    
-    // Job still running (1001, 1004, etc.) - wait and retry
+
     await new Promise(resolve => setTimeout(resolve, pollInterval));
   }
-  
+
   return { success: false, error: 'Job timeout after ' + maxPolls + ' polls' };
+}
+
+/**
+ * Récupère le dernier RowID via API v1 CloudSQL (SYNCHRONE)
+ * Cette méthode est rapide (~2s) car elle n'utilise pas de job async
+ */
+async function getLastRowIdSync(
+  apiDomain: string,
+  workspaceName: string,
+  tableName: string,
+  ownerEmail: string,
+  accessToken: string
+): Promise<{ success: boolean; maxRowId?: number; error?: string }> {
+  
+  const sqlQuery = `SELECT "RowID" FROM "${tableName}" ORDER BY "RowID" DESC LIMIT 1`;
+  
+  // API v1 CloudSQL endpoint
+  const url = `${apiDomain}/api/${encodeURIComponent(ownerEmail)}/${encodeURIComponent(workspaceName)}`;
+
+  console.log('[VerifyByRowID] CloudSQL URL:', url);
+  console.log('[VerifyByRowID] CloudSQL SQL:', sqlQuery);
+
+  const formData = new URLSearchParams();
+  formData.append('ZOHO_ACTION', 'EXPORT');
+  formData.append('ZOHO_OUTPUT_FORMAT', 'JSON');
+  formData.append('ZOHO_ERROR_FORMAT', 'JSON');
+  formData.append('ZOHO_API_VERSION', '1.0');
+  formData.append('ZOHO_SQLQUERY', sqlQuery);
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Zoho-oauthtoken ${accessToken}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: formData.toString(),
+  });
+
+  const responseText = await response.text();
+  console.log('[VerifyByRowID] CloudSQL status:', response.status);
+
+  if (!response.ok) {
+    console.error('[VerifyByRowID] CloudSQL error:', responseText.substring(0, 500));
+    return { success: false, error: `CloudSQL error: ${response.status}` };
+  }
+
+  try {
+    const data = JSON.parse(responseText);
+    
+    // Format: { "response": { "result": { "rows": [["3122445"]] } } }
+    const rows = data?.response?.result?.rows;
+    if (Array.isArray(rows) && rows.length > 0 && rows[0].length > 0) {
+      const rowId = parseInt(rows[0][0], 10);
+      if (!isNaN(rowId)) {
+        console.log('[VerifyByRowID] CloudSQL success - maxRowId:', rowId);
+        return { success: true, maxRowId: rowId };
+      }
+    }
+
+    // Vérifier s'il y a une erreur
+    if (data?.response?.error) {
+      console.error('[VerifyByRowID] CloudSQL API error:', data.response.error);
+      return { success: false, error: data.response.error.message || 'API error' };
+    }
+
+    console.error('[VerifyByRowID] Unexpected response format:', JSON.stringify(data).substring(0, 300));
+    return { success: false, error: 'Format de réponse inattendu' };
+
+  } catch (parseError) {
+    console.error('[VerifyByRowID] JSON parse error:', parseError);
+    return { success: false, error: 'Erreur parsing JSON' };
+  }
 }
 
 export async function GET(request: NextRequest) {
@@ -130,7 +195,7 @@ export async function GET(request: NextRequest) {
     // 1. Authentification
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
-    
+
     if (!user) {
       return NextResponse.json({ error: 'Non authentifié' }, { status: 401 });
     }
@@ -143,6 +208,7 @@ export async function GET(request: NextRequest) {
     // 2. Paramètres
     const searchParams = request.nextUrl.searchParams;
     const workspaceId = searchParams.get('workspaceId');
+    const workspaceName = searchParams.get('workspaceName');
     const tableName = searchParams.get('tableName');
     const action = searchParams.get('action');
     const minRowId = searchParams.get('minRowId');
@@ -155,91 +221,120 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // 3. Seule action supportée : getAfter
-    if (action !== 'getAfter') {
+    // 3. Validation de l'action
+    const validActions = ['getLastRowId', 'getAfter', 'getMaxAfter'];
+    if (!validActions.includes(action)) {
       return NextResponse.json(
-        { error: `Action invalide: ${action}. Seule 'getAfter' est supportée.` },
+        { error: `Action invalide: ${action}. Actions supportées: ${validActions.join(', ')}` },
         { status: 400 }
       );
     }
-
-    if (!minRowId) {
-      return NextResponse.json(
-        { error: 'minRowId requis pour action getAfter' },
-        { status: 400 }
-      );
-    }
-
-    const sqlQuery = `SELECT * FROM "${tableName}" WHERE "RowID" > ${minRowId} ORDER BY "RowID" ASC LIMIT ${limit}`;
-    console.log('[VerifyByRowID] SQL:', sqlQuery);
 
     const apiDomain = convertToAnalyticsDomain(tokens.apiDomain);
+
+    // ========== ACTION getLastRowId : API v1 CloudSQL (SYNCHRONE) ==========
+    if (action === 'getLastRowId') {
+      if (!workspaceName) {
+        return NextResponse.json(
+          { error: 'workspaceName requis pour getLastRowId' },
+          { status: 400 }
+        );
+      }
+
+      // Utiliser l'email Zoho stocké lors de l'OAuth
+      const ownerEmail = tokens.zohoEmail;
+      if (!ownerEmail) {
+        return NextResponse.json(
+          { error: 'Email Zoho non disponible. Reconnectez-vous à Zoho.' },
+          { status: 400 }
+        );
+      }
+
+      console.log('[VerifyByRowID] Using Zoho email:', ownerEmail);
+
+      const result = await getLastRowIdSync(
+        apiDomain,
+        workspaceName,
+        tableName,
+        ownerEmail,
+        tokens.accessToken
+      );
+
+      if (result.success) {
+        return NextResponse.json({
+          success: true,
+          action: 'getLastRowId',
+          maxRowId: result.maxRowId,
+        });
+      } else {
+        return NextResponse.json({
+          success: false,
+          error: result.error,
+        }, { status: 500 });
+      }
+    }
+
+    // ========== ACTIONS getAfter et getMaxAfter : API Bulk Async ==========
     const headers = {
       'Authorization': `Zoho-oauthtoken ${tokens.accessToken}`,
       'ZANALYTICS-ORGID': tokens.orgId || '',
     };
 
-    // 4. Créer un job d'export async (pour supporter les grosses tables)
-    const jobConfig = {
-      responseFormat: 'csv',
-      sqlQuery: sqlQuery,
-    };
+    let sqlQuery: string;
+    let maxPolls = 10;
+
+    if (action === 'getMaxAfter') {
+      if (!minRowId) {
+        return NextResponse.json({ error: 'minRowId requis pour getMaxAfter' }, { status: 400 });
+      }
+      sqlQuery = `SELECT MAX("RowID") as max_rowid FROM "${tableName}" WHERE "RowID" > ${minRowId}`;
+      console.log('[VerifyByRowID] SQL (getMaxAfter):', sqlQuery);
+      maxPolls = 15;
+    } else {
+      // getAfter
+      if (!minRowId) {
+        return NextResponse.json({ error: 'minRowId requis pour getAfter' }, { status: 400 });
+      }
+      sqlQuery = `SELECT * FROM "${tableName}" WHERE "RowID" > ${minRowId} ORDER BY "RowID" ASC LIMIT ${limit}`;
+      console.log('[VerifyByRowID] SQL (getAfter):', sqlQuery);
+    }
+
+    // Créer job async
+    const jobConfig = { responseFormat: 'csv', sqlQuery };
     const configEncoded = encodeURIComponent(JSON.stringify(jobConfig));
     const createJobUrl = `${apiDomain}/restapi/v2/bulk/workspaces/${workspaceId}/data?CONFIG=${configEncoded}`;
 
     console.log('[VerifyByRowID] Creating async job...');
-
-    const createResponse = await fetch(createJobUrl, {
-      method: 'GET',
-      headers,
-    });
-
+    const createResponse = await fetch(createJobUrl, { method: 'GET', headers });
     const createResult = await createResponse.json();
-    
-    if (createResult.status === 'failure') {
+
+    if (createResult.status === 'failure' || !createResult.data?.jobId) {
       console.error('[VerifyByRowID] Failed to create job:', createResult);
       return NextResponse.json({
         success: false,
-        error: createResult.data?.errorMessage || createResult.summary || 'Failed to create export job',
+        error: createResult.data?.errorMessage || 'Failed to create export job',
       }, { status: 400 });
     }
 
-    const jobId = createResult.data?.jobId;
-    if (!jobId) {
-      console.error('[VerifyByRowID] No jobId in response:', createResult);
-      return NextResponse.json({
-        success: false,
-        error: 'No jobId returned from Zoho',
-      }, { status: 500 });
-    }
-
+    const jobId = createResult.data.jobId;
     console.log('[VerifyByRowID] Job created:', jobId);
 
-    // 5. Attendre et télécharger les résultats
-    const result = await waitForJobAndDownload(
-      apiDomain,
-      workspaceId,
-      jobId,
-      headers,
-      30,  // max polls
-      500  // poll interval (rapide car c'est une petite requête)
-    );
+    const result = await waitForJobAndDownload(apiDomain, workspaceId, jobId, headers, maxPolls, 500);
 
     if (!result.success) {
-      return NextResponse.json({
-        success: false,
-        error: result.error,
-      }, { status: 500 });
+      return NextResponse.json({ success: false, error: result.error }, { status: 500 });
     }
 
-    console.log('[VerifyByRowID] Success - getAfter - rows:', result.data?.length);
+    if (action === 'getMaxAfter') {
+      const maxRowId = result.data?.[0]?.max_rowid;
+      const maxRowIdNumber = maxRowId ? parseInt(maxRowId, 10) : null;
+      console.log('[VerifyByRowID] Success - getMaxAfter:', maxRowIdNumber);
+      return NextResponse.json({ success: true, action: 'getMaxAfter', maxRowId: maxRowIdNumber });
+    }
 
-    return NextResponse.json({
-      success: true,
-      action: 'getAfter',
-      data: result.data,
-      rowCount: result.data?.length || 0,
-    });
+    // getAfter
+    console.log('[VerifyByRowID] Success - getAfter - rows:', result.data?.length);
+    return NextResponse.json({ success: true, action: 'getAfter', data: result.data, rowCount: result.data?.length || 0 });
 
   } catch (error) {
     console.error('[VerifyByRowID] Exception:', error);

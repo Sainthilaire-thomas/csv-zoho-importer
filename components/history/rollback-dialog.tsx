@@ -72,7 +72,7 @@ export function RollbackDialog({
 
   if (!open) return null;
 
-  const rowsToDelete = (importLog.row_id_after || 0) - (importLog.row_id_before || 0);
+  const rowsToDelete = importLog.rows_imported;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -110,9 +110,9 @@ export function RollbackDialog({
           </div>
 
           <div className="p-3 bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-800 rounded-md">
-            <p className="text-sm text-amber-800 dark:text-amber-200">
-              <strong>Attention :</strong> Cette action va supprimer environ{' '}
-              <strong>{rowsToDelete.toLocaleString('fr-FR')}</strong> lignes de la table Zoho.
+             <p className="text-sm text-amber-800 dark:text-amber-200">
+              <strong>Attention :</strong> Cette action va supprimer les{' '}
+              <strong>{rowsToDelete.toLocaleString('fr-FR')}</strong> lignes importées de la table Zoho.
               Cette action est irréversible.
             </p>
           </div>

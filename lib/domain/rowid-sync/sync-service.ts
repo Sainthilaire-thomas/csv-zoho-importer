@@ -7,9 +7,8 @@ import type {
   TableRowIdSync, 
   UpsertRowIdSyncData, 
   PreImportCheckResult,
-  RowIdProbeResult,
 } from './types';
-import { probeForMaxRowId } from './probe-service';
+import { ROWID_TOLERANCE } from './types';
 
 // ==================== LECTURE ====================
 
@@ -85,21 +84,17 @@ export async function manualResync(
 
 /**
  * Vérifie la synchronisation avant un import
- * 
- * @returns Instructions pour le wizard :
- *   - success: true → continuer avec estimatedStartRowId
- *   - success: false + needsResync: false → continuer avec actualStartRowId (recalé)
- *   - success: false + needsResync: true → afficher UI de resync
  */
 export async function checkSyncBeforeImport(
   zohoTableId: string,
   tableName: string,
-  workspaceId: string
+  workspaceId: string,
+  workspaceName: string  // NOUVEAU PARAMÈTRE
 ): Promise<PreImportCheckResult> {
-  
-  // 1. Récupérer l'état actuel
+
+  // 1. Récupérer l'état actuel depuis Supabase
   const sync = await getTableSync(zohoTableId);
-  
+
   if (!sync) {
     // Premier import sur cette table → demander le RowID initial
     return {
@@ -109,61 +104,113 @@ export async function checkSyncBeforeImport(
       message: 'Première utilisation sur cette table. Veuillez saisir le dernier RowID actuel.',
     };
   }
-  
+
   const estimatedStartRowId = sync.lastKnownRowid + 1;
-  
-  // 2. Sonder pour vérifier
-  const probeResult = await probeForMaxRowId({
+
+  // 2. Récupérer le vrai MAX(RowID) depuis Zoho via API v1 CloudSQL
+  console.log('[SyncCheck] Fetching real MAX(RowID) from Zoho...');
+  const realMaxRowId = await fetchRealMaxRowIdAfterImport(
     workspaceId,
-    tableName,
-    estimatedRowId: sync.lastKnownRowid,
-  });
-  
-  if (probeResult.success && probeResult.maxRowId !== undefined) {
-    const actualMaxRowId = probeResult.maxRowId;
-    const offset = probeResult.offset || 0;
-    
-    if (offset === 0) {
-      // Parfait ! Synchro exacte
-      return {
-        success: true,
-        estimatedStartRowId,
-        actualStartRowId: estimatedStartRowId,
-        needsResync: false,
-        message: 'Synchronisation OK',
-        probeResult,
-      };
-    } else {
-      // Petit décalage détecté, on recale automatiquement
-      const actualStartRowId = actualMaxRowId + 1;
-      const direction = offset > 0 ? 'ajoutées' : 'manquantes';
-      
-      return {
-        success: true,
-        estimatedStartRowId,
-        actualStartRowId,
-        needsResync: false,
-        message: `${Math.abs(offset)} ligne(s) ${direction} détectée(s). Synchronisation recalée.`,
-        probeResult,
-      };
-    }
+    workspaceName,  // NOUVEAU
+    tableName
+  );
+
+  // 3. Si l'API échoue → demander resync manuelle
+  if (realMaxRowId === null) {
+    console.warn('[SyncCheck] API failed, requesting manual resync');
+    return {
+      success: false,
+      estimatedStartRowId,
+      needsResync: true,
+      message: 'Impossible de vérifier la synchronisation. Veuillez saisir le dernier RowID actuel.',
+    };
   }
   
-  // 3. Échec du sondage → demander resync manuelle
-  return {
-    success: false,
-    estimatedStartRowId,
-    needsResync: true,
-    message: probeResult.errorMessage || 'Synchronisation perdue. Veuillez resaisir le dernier RowID.',
-    probeResult,
-  };
+  // 4. Comparer avec la valeur attendue
+  const offset = realMaxRowId - sync.lastKnownRowid;
+  console.log(`[SyncCheck] Real MAX: ${realMaxRowId}, Expected: ${sync.lastKnownRowid}, Offset: ${offset}`);
+  
+  if (offset === 0) {
+    // Parfait ! Synchro exacte
+    return {
+      success: true,
+      estimatedStartRowId,
+      actualStartRowId: estimatedStartRowId,
+      needsResync: false,
+      message: 'Synchronisation OK',
+    };
+  } else if (Math.abs(offset) <= ROWID_TOLERANCE) {
+    // Petit décalage détecté, on recale automatiquement
+    const actualStartRowId = realMaxRowId + 1;
+    const direction = offset > 0 ? 'ajoutées' : 'manquantes';
+    
+    return {
+      success: true,
+      estimatedStartRowId,
+      actualStartRowId,
+      needsResync: false,
+      message: `${Math.abs(offset)} ligne(s) ${direction} détectée(s). Synchronisation recalée.`,
+    };
+  } else {
+      // Écart trop important → demander confirmation avec la valeur détectée
+      return {
+        success: false,
+        estimatedStartRowId,
+        needsResync: true,
+        detectedRealRowId: realMaxRowId,
+        message: `Écart de ${Math.abs(offset)} RowID détecté (max toléré: ${ROWID_TOLERANCE}). Resynchronisation nécessaire.`,
+      };
+    }
 }
 
 // ==================== CALCUL POST-IMPORT ====================
 
 /**
- * Calcule le RowID de fin après un import
+ * Calcule le RowID de fin après un import (FALLBACK uniquement)
+ * ⚠️ Cette formule est approximative car Zoho crée des "trous" dans les RowID
+ * Utiliser fetchRealMaxRowIdAfterImport() pour obtenir la vraie valeur
  */
 export function calculateEndRowId(startRowId: number, rowCount: number): number {
   return startRowId + rowCount - 1;
+}
+
+// ==================== RÉCUPÉRATION RÉELLE POST-IMPORT ====================
+
+/**
+ * Récupère le vrai MAX(RowID) depuis Zoho après un import
+ * Utilise l'API v1 CloudSQL (synchrone, ~2-3s) au lieu de Bulk Async
+ *
+ * @param workspaceId - ID du workspace Zoho
+ * @param workspaceName - Nom du workspace Zoho (requis pour API v1)
+ * @param tableName - Nom de la table
+ * @returns Le vrai MAX(RowID) ou null si erreur
+ */
+export async function fetchRealMaxRowIdAfterImport(
+  workspaceId: string,
+  workspaceName: string,
+  tableName: string
+): Promise<number | null> {
+  try {
+    const params = new URLSearchParams({
+      workspaceId,
+      workspaceName,
+      tableName,
+      action: 'getLastRowId',
+    });
+
+    console.log('[RowIdSync] Fetching real MAX(RowID) via CloudSQL API...');
+    const response = await fetch(`/api/zoho/verify-by-rowid?${params}`);
+    const result = await response.json();
+
+    if (result.success && result.maxRowId !== null) {
+      console.log('[RowIdSync] Real MAX(RowID) fetched:', result.maxRowId);
+      return result.maxRowId;
+    }
+
+    console.warn('[RowIdSync] Failed to fetch real MAX(RowID):', result.error);
+    return null;
+  } catch (error) {
+    console.error('[RowIdSync] Error fetching real MAX(RowID):', error);
+    return null;
+  }
 }

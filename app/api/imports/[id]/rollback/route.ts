@@ -39,7 +39,8 @@ export async function POST(
 
     // Récupérer l'import à annuler
     const { data: importToRollback, error: fetchError } = await supabase
-      .from('import_logs')
+      .schema('csv_importer')
+    .from('import_logs')
       .select('*')
       .eq('id', id)
       .eq('user_id', user.id)
@@ -90,6 +91,7 @@ export async function POST(
 
     // === VÉRIFICATION 4: Contrainte LIFO ===
     const { data: newerImports, error: lifoError } = await supabase
+    .schema('csv_importer')
       .from('import_logs')
       .select('id, file_name, created_at')
       .eq('zoho_table_id', importToRollback.zoho_table_id)
@@ -156,6 +158,7 @@ export async function POST(
 
     // === METTRE À JOUR LE LOG ===
     const { error: updateError } = await supabase
+    .schema('csv_importer')
       .from('import_logs')
       .update({
         rolled_back: true,

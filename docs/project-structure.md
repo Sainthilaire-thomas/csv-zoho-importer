@@ -1,6 +1,6 @@
 ﻿# Structure du projet - csv-zoho-importer
 
-*Genere le 2026-01-23 10:50:30*
+*Genere le 2026-01-23 16:45:30*
 ```
 csv-zoho-importer/
 |-- .vscode/
@@ -65,6 +65,8 @@ csv-zoho-importer/
 |   |       |   +-- route.ts
 |   |       |-- tables/
 |   |       |   +-- route.ts
+|   |       |-- test-cloudsql/
+|   |       |   +-- route.ts
 |   |       |-- verify-by-rowid/
 |   |       |   +-- route.ts
 |   |       |-- verify-data/
@@ -83,6 +85,12 @@ csv-zoho-importer/
 |   |   +-- rollback-dialog.tsx
 |   |-- import/
 |   |   |-- wizard/
+|   |   |   |-- hooks/
+|   |   |   |   |-- index.ts
+|   |   |   |   |-- use-chunked-import.ts
+|   |   |   |   |-- use-import-wizard-state.ts
+|   |   |   |   |-- use-profile-management.ts
+|   |   |   |   +-- use-test-import.ts
 |   |   |   |-- import-wizard.tsx
 |   |   |   |-- index.ts
 |   |   |   |-- matching-column-selector.tsx
@@ -153,7 +161,8 @@ csv-zoho-importer/
 |   |   |   |-- mission-014-refactoring-import-wizard.md
 |   |   |   +-- TEMPLATE-MISSION.md
 |   |   |-- base-context.md
-|   |   +-- README.md
+|   |   |-- README.md
+|   |   +-- zoho-data-retrieval-methods.md
 |   |-- image/
 |   |   +-- specs-fonctionnelles/
 |   |       +-- 1764570677131.png
@@ -189,7 +198,6 @@ csv-zoho-importer/
 |   |   |   +-- types.ts
 |   |   |-- rowid-sync/
 |   |   |   |-- index.ts
-|   |   |   |-- probe-service.ts
 |   |   |   |-- sync-service.ts
 |   |   |   +-- types.ts
 |   |   |-- transformation/

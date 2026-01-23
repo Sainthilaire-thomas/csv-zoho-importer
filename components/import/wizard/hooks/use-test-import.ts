@@ -32,8 +32,10 @@ export interface TestImportConfig {
     importMode: ImportMode;  // ← Changer string en ImportMode
     file: File | null;
   };
-  /** ID du workspace */
+ /** ID du workspace */
   workspaceId: string;
+  /** Nom du workspace (pour API v1 CloudSQL) */
+  workspaceName: string;
   /** Colonnes de matching pour l'import */
   matchingColumns: string[];
   /** Profil sélectionné (optionnel) */
@@ -75,13 +77,14 @@ export interface TestImportActions {
 // ============================================================================
 
 export function useTestImport(config: TestImportConfig): TestImportActions {
-  const {
+    const {
     testImportState,
     rowIdState,
     parsedData,
     validation,
     importConfig,
     workspaceId,
+    workspaceName,  // ← AJOUTER
     matchingColumns,
     selectedProfile,
     zohoColumns,
@@ -151,7 +154,8 @@ export function useTestImport(config: TestImportConfig): TestImportActions {
         const syncCheck = await checkSyncBeforeImport(
           importConfig.tableId,
           importConfig.tableName,
-          workspaceId
+          workspaceId,
+          workspaceName
         );
 
         rowIdState.setSyncCheck(syncCheck);

@@ -6,7 +6,7 @@ import Papa from 'papaparse';
 import type { ImportProfile } from '@/types/profiles';
 import type { TestImportResult, ValidationResult, ImportMode, ImportProgress } from '@/types';
 import type { VerificationResult } from '@/lib/domain/verification';
-import { calculateEndRowId, updateSyncAfterImport } from '@/lib/domain/rowid-sync';
+import { calculateEndRowId, updateSyncAfterImport, fetchRealMaxRowIdAfterImport } from '@/lib/domain/rowid-sync';
 import type { ProfileState, TestImportState, RowIdState, SchemaState } from './use-import-wizard-state';
 
 // ============================================================================
@@ -45,6 +45,8 @@ export interface ChunkedImportConfig {
   };
   /** ID du workspace */
   workspaceId: string;
+   /** Nom du workspace (pour API v1 CloudSQL) */
+  workspaceName: string;
   /** Colonnes de matching pour l'import */
   matchingColumns: string[];
   /** Fonction pour obtenir les types de colonnes */
@@ -92,6 +94,7 @@ export function useChunkedImport(config: ChunkedImportConfig): ChunkedImportActi
     testResult,
     importConfig,
     workspaceId,
+     workspaceName,
     matchingColumns,
     getColumnTypesFromSchema,
     saveOrUpdateProfile,
@@ -214,29 +217,27 @@ export function useChunkedImport(config: ChunkedImportConfig): ChunkedImportActi
   // ─────────────────────────────────────────────────────────────────────────
   // Helper : Mettre à jour la sync RowID après import
   // ─────────────────────────────────────────────────────────────────────────
-  const updateRowIdSync = useCallback(async (totalRowsImported: number) => {
+ const updateRowIdSync = useCallback(async (maxRowIdAfter: number | null) => {
     if (!importConfig.tableId || !importConfig.tableName || !workspaceId) return;
-    if (rowIdState.rowIdStartForImportRef.current === null) return;
+    if (maxRowIdAfter === null) {
+      console.warn('[Import] Cannot update RowID sync: maxRowIdAfter is null');
+      return;
+    }
 
     try {
-      const endRowId = calculateEndRowId(
-        rowIdState.rowIdStartForImportRef.current,
-        totalRowsImported
-      );
-
       await updateSyncAfterImport({
         zohoTableId: importConfig.tableId,
         tableName: importConfig.tableName,
         workspaceId,
-        lastKnownRowid: endRowId,
+        lastKnownRowid: maxRowIdAfter,
         source: 'import',
       });
 
-      console.log('[Import] RowID sync updated:', endRowId);
+      console.log('[Import] RowID sync updated:', maxRowIdAfter);
     } catch (syncError) {
       console.warn('[Import] Failed to update RowID sync (non-blocking):', syncError);
     }
-  }, [importConfig, workspaceId, rowIdState.rowIdStartForImportRef]);
+  }, [importConfig, workspaceId]);
 
   // ─────────────────────────────────────────────────────────────────────────
   // Confirme l'import complet après test réussi
@@ -343,21 +344,32 @@ export function useChunkedImport(config: ChunkedImportConfig): ChunkedImportActi
         }
       }
 
-      // Calculer maxRowIdAfter
+      // Récupérer le VRAI maxRowIdAfter depuis Zoho (pas de calcul approximatif)
       let maxRowIdAfter: number | null = null;
       if (rowIdState.rowIdStartForImportRef.current !== null) {
-        maxRowIdAfter = calculateEndRowId(
-          rowIdState.rowIdStartForImportRef.current,
-          totalRowsImported
+        console.log('[Import] Fetching real MAX(RowID) from Zoho...');
+          maxRowIdAfter = await fetchRealMaxRowIdAfterImport(
+          workspaceId,
+          workspaceName,
+          importConfig.tableName
         );
-        console.log('[Import] Calculated MAX(RowID) after import:', maxRowIdAfter);
+        // Fallback sur le calcul si l'API échoue (non bloquant)
+        if (maxRowIdAfter === null) {
+          console.warn('[Import] API failed, using calculated fallback');
+          maxRowIdAfter = calculateEndRowId(
+            rowIdState.rowIdStartForImportRef.current,
+            totalRowsImported
+          );
+        }
+        
+        console.log('[Import] Final MAX(RowID) after import:', maxRowIdAfter);
       }
 
       // Logger l'import dans l'historique
       await logImportToHistory(totalRowsImported, totalChunks, duration, maxRowIdAfter);
 
       // Mettre à jour la sync RowID
-      await updateRowIdSync(totalRowsImported);
+       await updateRowIdSync(maxRowIdAfter);
 
       // Succès
       importActions.setImportSuccess({

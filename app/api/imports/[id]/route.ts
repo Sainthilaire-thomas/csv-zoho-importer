@@ -27,7 +27,8 @@ export async function GET(
     }
 
     // Récupérer l'import
-    const { data: importLog, error } = await supabase
+     const { data: importLog, error } = await supabase
+      .schema('csv_importer')
       .from('import_logs')
       .select('*')
       .eq('id', id)

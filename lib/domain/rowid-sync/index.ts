@@ -5,17 +5,13 @@
 
 // Types
 export type {
-  RowIdProbeResult,
   TableRowIdSync,
   UpsertRowIdSyncData,
   PreImportCheckResult,
-  ProbeParams,
 } from './types';
-
 export { ROWID_TOLERANCE } from './types';
 
 // Services
-export { probeForMaxRowId, checkMultipleRowIds } from './probe-service';
 export {
   getTableSync,
   getEstimatedStartRowId,
@@ -23,4 +19,5 @@ export {
   manualResync,
   checkSyncBeforeImport,
   calculateEndRowId,
+  fetchRealMaxRowIdAfterImport,
 } from './sync-service';
