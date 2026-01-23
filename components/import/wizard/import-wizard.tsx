@@ -1,7 +1,7 @@
 ﻿// components/import/wizard/import-wizard.tsx
 'use client';
 
-import { useCallback, useEffect, useState, useRef } from 'react';
+import { useCallback, useEffect } from 'react';
 import { WizardProgress } from './wizard-progress';
 import { StepSource } from './step-source';
 import { StepProfile } from './step-profile';
@@ -11,75 +11,69 @@ import { StepReview } from './step-review';
 import { StepResolve } from './step-resolve';
 import { StepConfirm } from './step-confirm';
 import { StepTransformPreview } from './step-transform-preview';
-import { verifyImport, type SentRow, type VerificationResult, EMPTY_VERIFICATION_RESULT } from '@/lib/domain/verification';
 import { StepTestImport } from './step-test-import';
 import { StepTestResult } from './step-test-result';
 import { applyAllTransformations } from '@/lib/domain/data-transformer';
-import { MatchingColumnSelector } from './matching-column-selector';
-import { 
-  findBestMatchingColumnEnhanced, 
-  type MatchingColumnResult 
-} from '@/lib/domain/verification';
-import { executeRollback, type RollbackResult } from '@/lib/domain/rollback';
-import type { TestImportResult } from '@/types';
+import { validateSchema } from '@/lib/domain/schema-validator';
+import { RowIdSyncDialog } from '@/components/import/rowid-sync-dialog';
 
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { useImport } from '@/lib/hooks/use-import';
 import { useCsvParser } from '@/lib/hooks/use-csv-parser';
 import { useValidation } from '@/lib/hooks/use-validation';
-import { validateSchema } from '@/lib/domain/schema-validator';
 import { RotateCcw } from 'lucide-react';
+
 import type { FileSource, TableValidationConfig } from '@/types';
 import type { SchemaValidationResult, ZohoTableSchema, ResolvableIssue } from '@/lib/infrastructure/zoho/types';
-import type { ImportProfile, ProfileMatchResult, DetectedColumn } from '@/types/profiles';
-import Papa from 'papaparse';
-import { toast } from 'sonner';
-// Mission 013 : RowID Sync
-import { checkSyncBeforeImport, updateSyncAfterImport, calculateEndRowId } from '@/lib/domain/rowid-sync';
-import { RowIdSyncDialog } from '@/components/import/rowid-sync-dialog';
-import type { PreImportCheckResult } from '@/lib/domain/rowid-sync/types';
 
-// ==================== CONSTANTES CHUNKING ====================
-const CHUNK_SIZE = 5000;  // Lignes par chunk (~ 1-2MB selon les données)
-const MAX_RETRIES = 2;    // Tentatives par chunk en cas d'erreur
+// Import des hooks extraits
+import {
+  useImportWizardState,
+  useProfileManagement,
+  useTestImport,
+  useChunkedImport,
+} from './hooks';
 
-interface ZohoWorkspace {
-  id: string;
-  name: string;
-}
+// ============================================================================
+// Types
+// ============================================================================
 
 interface ImportWizardProps {
   className?: string;
 }
 
-type ProfileMode = 'existing' | 'new' | 'skip';
+// ============================================================================
+// Component
+// ============================================================================
 
 export function ImportWizard({ className = '' }: ImportWizardProps) {
+  // ─────────────────────────────────────────────────────────────────────────
+  // Core import hook (from lib/hooks)
+  // ─────────────────────────────────────────────────────────────────────────
   const {
-  state,
-  setFile,
-  removeFile,
-  setTable,
-  setImportMode,
-  startValidation,
-  setValidationResult,
-  setValidationError,
-  startImport,
-  startTestImport,        // ← NOUVEAU
-  setTestImportComplete,  // ← NOUVEAU
-  startFullImport,        // ← NOUVEAU
-  updateProgress,
-  setImportSuccess,
-  setImportError,
-  goToStep,
-  goNext,
-  goBack,
-  reset,
-  canGoNext,
-  isImporting,
-  isTestImporting,        // ← NOUVEAU
-} = useImport();
+    state,
+    setFile,
+    removeFile,
+    setTable,
+    setImportMode,
+    startValidation,
+    setValidationResult,
+    setValidationError,
+    startTestImport,
+    setTestImportComplete,
+    startFullImport,
+    updateProgress,
+    setImportSuccess,
+    setImportError,
+    goToStep,
+    goNext,
+    goBack,
+    reset,
+    canGoNext,
+    isImporting,
+    isTestImporting,
+  } = useImport();
 
   const { parseFile } = useCsvParser();
   const { validate } = useValidation({
@@ -93,58 +87,112 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
     },
   });
 
-  // Workspaces
-  const [workspaces, setWorkspaces] = useState<ZohoWorkspace[]>([]);
-  const [isLoadingWorkspaces, setIsLoadingWorkspaces] = useState(false);
-  const [workspacesError, setWorkspacesError] = useState<string | null>(null);
-  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string>('');
+  // ─────────────────────────────────────────────────────────────────────────
+  // Wizard state (extracted hook)
+  // ─────────────────────────────────────────────────────────────────────────
+  const wizardState = useImportWizardState();
 
-  // Donnees parsees et validation de schema
-  const [parsedData, setParsedData] = useState<Record<string, unknown>[] | null>(null);
-  const [schemaValidation, setSchemaValidation] = useState<SchemaValidationResult | null>(null);
-  const [zohoSchema, setZohoSchema] = useState<ZohoTableSchema | null>(null);
-  const [zohoReferenceRow, setZohoReferenceRow] = useState<Record<string, unknown> | null>(null);
+  // ─────────────────────────────────────────────────────────────────────────
+  // Profile management (extracted hook)
+  // ─────────────────────────────────────────────────────────────────────────
+  const profileActions = useProfileManagement({
+    profileState: wizardState.profile,
+    issuesState: wizardState.issues,
+    workspaces: wizardState.workspaces.workspaces,
+    selectedWorkspaceId: wizardState.workspaces.selectedId,
+    importConfig: {
+      tableId: state.config.tableId,
+      tableName: state.config.tableName,
+      importMode: state.config.importMode,
+    },
+    navigation: {
+  setTable,
+  setImportMode,
+  goToStep,
+  setWorkspaceId: wizardState.workspaces.setSelectedId,
+},
+  });
 
-  // Issues resolues par l utilisateur
-  const [resolvedIssues, setResolvedIssues] = useState<ResolvableIssue[] | null>(null);
-  const [issuesResolved, setIssuesResolved] = useState(false);
+  // ─────────────────────────────────────────────────────────────────────────
+  // Helper: Get column types from Zoho schema
+  // ─────────────────────────────────────────────────────────────────────────
+  const getColumnTypesFromSchema = useCallback((): Record<string, string> | undefined => {
+    const { zohoSchema } = wizardState.schema;
+    if (!zohoSchema?.columns || zohoSchema.columns.length === 0) {
+      return undefined;
+    }
 
-  // ==========================================================================
-  // Etat du profil
-  // ==========================================================================
-  const [profileMode, setProfileMode] = useState<ProfileMode>('skip');
-  const [selectedProfile, setSelectedProfile] = useState<ImportProfile | null>(null);
-  const [selectedMatchResult, setSelectedMatchResult] = useState<ProfileMatchResult | null>(null);
-  const [detectedColumns, setDetectedColumns] = useState<DetectedColumn[]>([]);
- const [matchingColumns, setMatchingColumns] = useState<string[]>([]);
-const [verificationSample, setVerificationSample] = useState<SentRow[]>([]);
+    const types: Record<string, string> = {};
+    for (const col of zohoSchema.columns) {
+      types[col.columnName] = col.dataType;
+    }
 
-// ==========================================================================
-// État pour l'import en 2 phases
-// ==========================================================================
-const [testSampleSize, setTestSampleSize] = useState(5);
-const [verificationColumn, setVerificationColumn] = useState<string | null>(null);
-const [matchingColumnResult, setMatchingColumnResult] = useState<MatchingColumnResult | null>(null);
-const [testMatchingValues, setTestMatchingValues] = useState<string[]>([]);
-// Ref pour accès immédiat à l'échantillon (évite le délai du state React)
-const verificationSampleRef = useRef<SentRow[]>([]);
-// Refs pour accès immédiat aux valeurs de matching (évite le délai du state React)
-const verificationColumnRef = useRef<string | null>(null);
-const testMatchingValuesRef = useRef<string[]>([]);
-// Mission 012 : Stratégie RowID
-const [maxRowIdBeforeTest, setMaxRowIdBeforeTest] = useState<number | null>(null);
-const maxRowIdBeforeTestRef = useRef<number | null>(null);
-const [tableName, setTableName] = useState<string | null>(null);
-// Mission 013 : États pour la synchronisation RowID
-const [rowIdSyncCheck, setRowIdSyncCheck] = useState<PreImportCheckResult | null>(null);
-const [showRowIdSyncDialog, setShowRowIdSyncDialog] = useState(false);
-const [rowIdStartForImport, setRowIdStartForImport] = useState<number | null>(null);
-const rowIdStartForImportRef = useRef<number | null>(null);
-  // Charger les workspaces au montage
+    return Object.keys(types).length > 0 ? types : undefined;
+  }, [wizardState.schema]);
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Test import (extracted hook)
+  // ─────────────────────────────────────────────────────────────────────────
+  const testImportActions = useTestImport({
+    testImportState: wizardState.testImport,
+    rowIdState: wizardState.rowId,
+    parsedData: wizardState.schema.parsedData,
+    validation: state.validation,
+    importConfig: {
+      tableId: state.config.tableId,
+      tableName: state.config.tableName,
+      importMode: state.config.importMode,
+      file: state.config.file,
+    },
+    workspaceId: wizardState.workspaces.selectedId,
+    matchingColumns: wizardState.profile.matchingColumns,
+    selectedProfile: wizardState.profile.selectedProfile,
+    zohoColumns: wizardState.schema.zohoSchema?.columns,
+    getColumnTypesFromSchema,
+    importActions: {
+      startTestImport,
+      setTestImportComplete,
+      setImportError,
+      goToStep,
+    },
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Chunked import (extracted hook)
+  // ─────────────────────────────────────────────────────────────────────────
+  const chunkedImportActions = useChunkedImport({
+    schemaState: wizardState.schema,
+    profileState: wizardState.profile,
+    testImportState: wizardState.testImport,
+    rowIdState: wizardState.rowId,
+    validation: state.validation,
+    testResult: state.testResult,
+    importConfig: {
+      tableId: state.config.tableId,
+      tableName: state.config.tableName,
+      importMode: state.config.importMode,
+      file: state.config.file,
+    },
+    workspaceId: wizardState.workspaces.selectedId,
+    matchingColumns: wizardState.profile.matchingColumns,
+    getColumnTypesFromSchema,
+    saveOrUpdateProfile: profileActions.saveOrUpdateProfile,
+    importActions: {
+      startFullImport,
+      updateProgress,
+      setImportSuccess,
+      setImportError,
+    },
+    resetAll: wizardState.resetAll,
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Load workspaces on mount
+  // ─────────────────────────────────────────────────────────────────────────
   useEffect(() => {
     async function fetchWorkspaces() {
-      setIsLoadingWorkspaces(true);
-      setWorkspacesError(null);
+      wizardState.workspaces.setIsLoading(true);
+      wizardState.workspaces.setError(null);
 
       try {
         const response = await fetch('/api/zoho/workspaces');
@@ -154,71 +202,72 @@ const rowIdStartForImportRef = useRef<number | null>(null);
           throw new Error(data.error || 'Erreur lors du chargement des workspaces');
         }
 
-        setWorkspaces(data.workspaces || []);
+        wizardState.workspaces.setWorkspaces(data.workspaces || []);
 
         if (data.workspaces?.length === 1) {
-          setSelectedWorkspaceId(data.workspaces[0].id);
+          wizardState.workspaces.setSelectedId(data.workspaces[0].id);
         }
       } catch (error) {
         console.error('Erreur chargement workspaces:', error);
-        setWorkspacesError(error instanceof Error ? error.message : 'Erreur inconnue');
+        wizardState.workspaces.setError(
+          error instanceof Error ? error.message : 'Erreur inconnue'
+        );
       } finally {
-        setIsLoadingWorkspaces(false);
+        wizardState.workspaces.setIsLoading(false);
       }
     }
 
     fetchWorkspaces();
   }, []);
 
-  // ==========================================================================
-  // Pre-remplir config si profil existant selectionne
-  // ==========================================================================
+  // ─────────────────────────────────────────────────────────────────────────
+  // Pre-fill config when existing profile selected
+  // ─────────────────────────────────────────────────────────────────────────
   useEffect(() => {
-    if (selectedProfile && profileMode === 'existing') {
-      setSelectedWorkspaceId(selectedProfile.workspaceId);
+    const { selectedProfile, mode } = wizardState.profile;
+    if (selectedProfile && mode === 'existing') {
+      wizardState.workspaces.setSelectedId(selectedProfile.workspaceId);
       setTable(selectedProfile.viewId, selectedProfile.viewName);
       setImportMode(selectedProfile.defaultImportMode);
     }
-  }, [selectedProfile, profileMode, setTable, setImportMode]);
+  }, [wizardState.profile.selectedProfile, wizardState.profile.mode, setTable, setImportMode]);
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // Handlers
+  // ─────────────────────────────────────────────────────────────────────────
   const handleSourceChange = useCallback((source: FileSource) => {
     if (source === 'sftp') {
-      return;
+      return; // SFTP not implemented yet
     }
   }, []);
 
   const handleWorkspaceChange = useCallback((workspaceId: string) => {
-    setSelectedWorkspaceId(workspaceId);
+    wizardState.workspaces.setSelectedId(workspaceId);
     setTable('', '');
-    setSchemaValidation(null);
-    setZohoSchema(null);
-    setResolvedIssues(null);
-    setIssuesResolved(false);
-  }, [setTable]);
+    wizardState.schema.setSchemaValidation(null);
+    wizardState.schema.setZohoSchema(null);
+    wizardState.issues.resetIssues();
+  }, [setTable, wizardState.workspaces, wizardState.schema, wizardState.issues]);
 
-  // ==========================================================================
-  // NOUVEAU : Helper pour extraire les types de colonnes du schema Zoho
-  // ==========================================================================
-  const getColumnTypesFromSchema = useCallback((): Record<string, string> | undefined => {
-    if (!zohoSchema?.columns || zohoSchema.columns.length === 0) {
-      console.log('[ColumnTypes] Pas de schema Zoho disponible');
-      return undefined;
-    }
-    
-    const types: Record<string, string> = {};
-    for (const col of zohoSchema.columns) {
-      types[col.columnName] = col.dataType;
-    }
-    
-    console.log('[ColumnTypes] Types extraits du schema Zoho:', types);
-    return Object.keys(types).length > 0 ? types : undefined;
-  }, [zohoSchema]);
+  const handleIssuesResolved = useCallback((resolved: ResolvableIssue[]) => {
+    console.log('Issues résolues:', resolved.length);
+    wizardState.issues.setResolvedIssues(resolved);
+    wizardState.issues.setIssuesResolved(true);
+  }, [wizardState.issues]);
 
-  // Recuperer le schema Zoho d une table
-  const fetchZohoSchema = useCallback(async (workspaceId: string, viewId: string, viewName: string): Promise<ZohoTableSchema | null> => {
+  // ─────────────────────────────────────────────────────────────────────────
+  // Fetch Zoho schema
+  // ─────────────────────────────────────────────────────────────────────────
+  const fetchZohoSchema = useCallback(async (
+    workspaceId: string,
+    viewId: string,
+    viewName: string
+  ): Promise<ZohoTableSchema | null> => {
     try {
       console.log('[Schema] Fetching schema for', viewId);
-      const response = await fetch(`/api/zoho/columns?workspaceId=${workspaceId}&viewId=${viewId}`);
+      const response = await fetch(
+        `/api/zoho/columns?workspaceId=${workspaceId}&viewId=${viewId}`
+      );
       const data = await response.json();
 
       if (!response.ok) {
@@ -242,104 +291,84 @@ const rowIdStartForImportRef = useRef<number | null>(null);
     }
   }, []);
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // Validation handler
+  // ─────────────────────────────────────────────────────────────────────────
   const handleValidation = useCallback(async () => {
-    console.log('handleValidation demarre');
+    console.log('handleValidation démarré');
     if (!state.config.file || !state.config.tableId) {
       console.log('Pas de fichier ou tableId');
       return;
     }
 
     startValidation();
-    
-    // Reset les etats de resolution
-    setResolvedIssues(null);
-    setIssuesResolved(false);
+    wizardState.issues.resetIssues();
 
     try {
-      // Phase 1: Parsing du fichier
+      // Phase 1: Parsing
       updateProgress({ phase: 'parsing', current: 0, total: 100, percentage: 0 });
-      console.log('Debut du parsing...');
       const parseResult = await parseFile(state.config.file);
-      console.log('Parsing termine, lignes:', parseResult.totalRows);
-      
+      console.log('Parsing terminé, lignes:', parseResult.totalRows);
       updateProgress({ phase: 'parsing', current: 100, total: 100, percentage: 20 });
 
-      // Phase 2: Recuperation du schema Zoho
+      // Phase 2: Fetch Zoho schema
       updateProgress({ phase: 'validating', current: 20, total: 100, percentage: 30 });
-      console.log('Recuperation du schema Zoho...');
-      const schema = await fetchZohoSchema(selectedWorkspaceId, state.config.tableId, state.config.tableName);
-      setZohoSchema(schema);
+      const schema = await fetchZohoSchema(
+        wizardState.workspaces.selectedId,
+        state.config.tableId,
+        state.config.tableName
+      );
+      wizardState.schema.setZohoSchema(schema);
 
-     
-      // Phase 2b: Récupération d'une ligne de référence Zoho (pour preview)
+      // Phase 2b: Fetch reference row for preview
       try {
         const refResponse = await fetch(
-         `/api/zoho/sample-row?workspaceId=${selectedWorkspaceId}&tableName=${encodeURIComponent(state.config.tableName)}`
+          `/api/zoho/sample-row?workspaceId=${wizardState.workspaces.selectedId}&tableName=${encodeURIComponent(state.config.tableName)}`
         );
         const refData = await refResponse.json();
         if (refData.success && refData.data) {
-          setZohoReferenceRow(refData.data);
-          console.log('[Reference] Ligne Zoho de référence récupérée:', refData.data);
+          wizardState.schema.setZohoReferenceRow(refData.data);
         } else {
-          setZohoReferenceRow(null);
-          console.log('[Reference] Aucune donnée existante dans la table');
+          wizardState.schema.setZohoReferenceRow(null);
         }
       } catch (refError) {
         console.warn('[Reference] Erreur récupération ligne de référence:', refError);
-        setZohoReferenceRow(null);
+        wizardState.schema.setZohoReferenceRow(null);
       }
 
-      // Phase 3: Validation du schema (correspondance colonnes)
-let schemaResult: SchemaValidationResult | null = null;
+      // Phase 3: Schema validation
+      let schemaResult: SchemaValidationResult | null = null;
 
-if (schema && schema.columns.length > 0) {
+      if (schema && schema.columns.length > 0) {
         updateProgress({ phase: 'validating', current: 40, total: 100, percentage: 50 });
-        console.log('Validation du schema...');
 
-        // Extraire les headers et donnees pour la validation
         const headers = parseResult.data.length > 0 ? Object.keys(parseResult.data[0]) : [];
         const sampleData = parseResult.data.slice(0, 100).map(row =>
           headers.map(h => String((row as Record<string, unknown>)[h] ?? ''))
         );
 
-       schemaResult = validateSchema({
+        schemaResult = validateSchema({
           fileHeaders: headers,
           sampleData,
           zohoSchema: schema,
-          profile: selectedProfile || undefined,
+          profile: wizardState.profile.selectedProfile || undefined,
         });
 
-        setSchemaValidation(schemaResult);
+        wizardState.schema.setSchemaValidation(schemaResult);
         console.log('Schema validation:', schemaResult.summary);
-        console.log('Auto transformations:', schemaResult.autoTransformations);
-        
-        // Log des issues detectees
-        if (schemaResult.resolvableIssues && schemaResult.resolvableIssues.length > 0) {
-          console.log('Issues a resoudre:', schemaResult.resolvableIssues.length);
-          schemaResult.resolvableIssues.forEach(issue => {
-            console.log(`  - ${issue.type}: ${issue.column} - ${issue.message}`);
-          });
-        }
       } else {
-        console.log('Pas de schema Zoho disponible, validation classique uniquement');
-        setSchemaValidation(null);
+        wizardState.schema.setSchemaValidation(null);
       }
 
-       // ========================================================================
-      // Appliquer les transformations aux données parsées
-      // C'est la SOURCE DE VÉRITÉ - ces données seront utilisées pour preview ET envoi à Zoho
-      // ========================================================================
+      // Apply transformations (SOURCE OF TRUTH)
       const transformedData = applyAllTransformations(
         parseResult.data as Record<string, unknown>[],
         schemaResult?.matchedColumns
       );
       console.log('[Transformation] Données transformées:', transformedData.length, 'lignes');
-      
-      // Stocker les données TRANSFORMÉES (pas les données brutes)
-      setParsedData(transformedData);
+      wizardState.schema.setParsedData(transformedData);
 
-     
-      // Phase 4: Validation des donnees (regles metier)
+      // Phase 4: Data validation
       updateProgress({ phase: 'validating', current: 60, total: 100, percentage: 70 });
       const validationConfig: TableValidationConfig = {
         tableId: state.config.tableId,
@@ -347,1021 +376,44 @@ if (schema && schema.columns.length > 0) {
         columns: [],
       };
 
-      console.log('Debut de la validation des donnees...');
       const result = await validate(transformedData, validationConfig);
-      console.log('Validation terminee:', result);
-
+      console.log('Validation terminée:', result);
       setValidationResult(result);
+
     } catch (error) {
       console.error('Erreur validation:', error);
       setValidationError(
         error instanceof Error ? error.message : 'Erreur lors de la validation'
       );
     }
-  }, [state.config.file, state.config.tableId, state.config.tableName, selectedWorkspaceId, startValidation, updateProgress, parseFile, fetchZohoSchema, validate, setValidationResult, setValidationError, selectedProfile]);
-
-  // ==========================================================================
-  // Fonction pour sauvegarder ou mettre a jour le profil
-  // ==========================================================================
-  const saveOrUpdateProfile = useCallback(async () => {
-    const workspace = workspaces.find(w => w.id === selectedWorkspaceId);
-    if (!workspace) {
-      console.error('Workspace non trouve');
-      return;
-    }
-
-    if (profileMode === 'existing' && selectedProfile) {
-      console.log('Mise a jour du profil existant:', selectedProfile.id);
-
-      const updates: Record<string, unknown> = {
-        lastUsedAt: new Date().toISOString(),
-        incrementUseCount: true,
-      };
-
-      if (selectedMatchResult) {
-        const newAliases: Record<string, string[]> = {};
-        
-        for (const mapping of selectedMatchResult.mappings) {
-          if (mapping.status === 'similar' && mapping.profileColumn) {
-            const zohoCol = mapping.profileColumn.zohoColumn;
-            if (!mapping.profileColumn.acceptedNames.includes(mapping.fileColumn)) {
-              if (!newAliases[zohoCol]) newAliases[zohoCol] = [];
-              newAliases[zohoCol].push(mapping.fileColumn);
-            }
-          }
-        }
-
-        if (Object.keys(newAliases).length > 0) {
-          updates.newAliases = newAliases;
-        }
-      }
-
-      if (resolvedIssues && resolvedIssues.length > 0) {
-        const newFormats: Record<string, string[]> = {};
-
-        for (const issue of resolvedIssues) {
-          if (issue.type === 'ambiguous_date_format' && issue.resolution) {
-            const profileCol = selectedProfile.columns.find(c => 
-              c.acceptedNames.some(name => 
-                name.toLowerCase() === issue.column.toLowerCase()
-              )
-            );
-            
-            if (profileCol) {
-              const zohoCol = profileCol.zohoColumn;
-              const format = issue.resolution?.type === 'date_format' ? issue.resolution.format : 'DD/MM/YYYY';
-              
-              if (!newFormats[zohoCol]) newFormats[zohoCol] = [];
-              if (!newFormats[zohoCol].includes(format)) {
-                newFormats[zohoCol].push(format);
-              }
-            }
-          }
-        }
-
-        if (Object.keys(newFormats).length > 0) {
-          updates.newFormats = newFormats;
-        }
-      }
-
-      await fetch(`/api/profiles/${selectedProfile.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updates),
-      });
-
-      console.log('Profil mis a jour avec succes');
-
-    } else if (profileMode === 'new') {
-      console.log('Creation d un nouveau profil');
-
-      const profileColumns = detectedColumns.map(col => {
-        const resolution = resolvedIssues?.find(r => r.column === col.name);
-        
-        let dataType: 'date' | 'duration' | 'number' | 'text' | 'boolean' = 'text';
-        if (col.detectedType === 'date') dataType = 'date';
-        else if (col.detectedType === 'duration') dataType = 'duration';
-        else if (col.detectedType === 'number') dataType = 'number';
-        else if (col.detectedType === 'boolean') dataType = 'boolean';
-
-        let config: Record<string, unknown>;
-        
-        if (dataType === 'date') {
-          const dayMonthOrder = (resolution?.resolution?.type === 'date_format' && resolution.resolution.format === 'MM/DD/YYYY') ? 'mdy' : 'dmy';
-          config = {
-            type: 'date',
-            acceptedFormats: col.detectedFormat ? [col.detectedFormat] : ['DD/MM/YYYY'],
-            dayMonthOrder,
-            outputFormat: 'iso',
-          };
-        } else if (dataType === 'duration') {
-          config = {
-            type: 'duration',
-            acceptedFormats: col.detectedFormat ? [col.detectedFormat] : ['HH:mm', 'HH:mm:ss'],
-            outputFormat: 'hms',
-          };
-        } else if (dataType === 'number') {
-          config = {
-            type: 'number',
-            acceptedFormats: [
-              { decimalSeparator: ',', thousandSeparator: ' ' },
-              { decimalSeparator: '.', thousandSeparator: null },
-            ],
-            expandScientific: true,
-            outputFormat: 'standard',
-          };
-        } else if (dataType === 'boolean') {
-          config = {
-            type: 'boolean',
-            trueValues: ['Oui', 'Yes', '1', 'Vrai', 'true', 'O'],
-            falseValues: ['Non', 'No', '0', 'Faux', 'false', 'N'],
-          };
-        } else {
-          config = {
-            type: 'text',
-            trim: true,
-            emptyValues: ['N/A', 'null', '-', 'NA', 'n/a'],
-            expandScientific: true,
-          };
-        }
-
-        return {
-          zohoColumn: col.name,
-          zohoType: 'PLAIN',
-          isRequired: false,
-          acceptedNames: [col.name],
-          dataType,
-          config,
-        };
-      });
-
-     const profilePayload = {
-        name: `Import ${state.config.tableName} - ${new Date().toLocaleDateString('fr-FR')}`,
-        workspaceId: selectedWorkspaceId,
-        workspaceName: workspace.name,
-        viewId: state.config.tableId,
-        viewName: state.config.tableName,
-        columns: profileColumns,
-        defaultImportMode: state.config.importMode,
-        matchingColumns: matchingColumns.length > 0 ? matchingColumns : null,
-      };
-
-      const response = await fetch('/api/profiles', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(profilePayload),
-      });
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        if (response.status === 409) {
-          // Un profil existe déjà pour cette table, on le met à jour avec les colonnes
-          console.log('Profil existant trouvé, mise à jour:', result.existingProfileId);
-          
-          // Faire un PUT pour mettre à jour le profil existant
-           const updateResponse = await fetch(`/api/profiles/${result.existingProfileId}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              columns: profileColumns,
-              defaultImportMode: state.config.importMode,
-              matchingColumns: matchingColumns.length > 0 ? matchingColumns : null,
-              lastUsedAt: new Date().toISOString(),
-              useCount: 1,
-            }),
-          });
-          
-          if (updateResponse.ok) {
-            console.log('Profil existant mis à jour avec', profileColumns.length, 'colonnes');
-          } else {
-            console.error('Erreur mise à jour profil existant:', updateResponse.status);
-          }
-          return;
-        }
-        throw new Error(`Erreur creation profil: ${response.status}`);
-      } else {
-        console.log('Nouveau profil cree:', result.data?.id);
-      }
-    }
-  }, [profileMode, selectedProfile, selectedMatchResult, resolvedIssues, detectedColumns, selectedWorkspaceId, workspaces, state.config, matchingColumns]);
-
- const handleImport = useCallback(async () => {
-  if (!parsedData || !state.config.tableId || !state.validation) return;
-
-  startImport();
-
-  try {
-    const validData = parsedData.filter((_, index) => {
-      const lineNumber = index + 2;
-      return !state.validation!.errors.some((err) => err.line === lineNumber);
-    });
-
-    // ==================== NOUVEAU : Sauvegarder échantillon pour vérification ====================
-    const sampleSize = 5;
-    const sampleRows: SentRow[] = validData.slice(0, sampleSize).map((row, index) => ({
-      index: index + 2, // +2 car ligne 1 = headers, index 0 = ligne 2
-      data: Object.fromEntries(
-        Object.entries(row).map(([k, v]) => [k, String(v ?? '')])
-      ) as Record<string, string>,
-    }));
-    setVerificationSample(sampleRows);
-    
-    // ==================== FIN NOUVEAU ====================
-
-    const csvData = Papa.unparse(validData);
-
-    updateProgress({
-      phase: 'importing',
-      current: 0,
-      total: validData.length,
-      percentage: 0,
-    });
-
-    const response = await fetch('/api/zoho/import', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        workspaceId: selectedWorkspaceId,
-        tableId: state.config.tableId,
-        tableName: state.config.tableName,
-        importMode: state.config.importMode,
-        csvData: csvData,
-        fileName: state.config.file?.name,
-        totalRows: validData.length,
-        matchingColumns: matchingColumns.length > 0 ? matchingColumns : undefined,
-        columnTypes: getColumnTypesFromSchema(),  // ← NOUVEAU : Passer les types Zoho
-      }),
-    });
-
-    const result = await response.json();
-
-    if (!response.ok) {
-      throw new Error(result.error || "Erreur lors de l'import");
-    }
-
-    // Sauvegarder/mettre à jour le profil après import réussi
-    if (profileMode !== 'skip') {
-      try {
-        await saveOrUpdateProfile();
-      } catch (profileError) {
-        console.error('Erreur sauvegarde profil (non bloquant):', profileError);
-      }
-    }
-
-    // ==================== NOUVEAU : Lancer la vérification post-import ====================
-    let verificationResult: VerificationResult = EMPTY_VERIFICATION_RESULT;
-    
-    if (sampleRows.length > 0) {
-      try {
-        updateProgress({
-          phase: 'validating', // Réutiliser pour afficher "Vérification..."
-          current: 90,
-          total: 100,
-          percentage: 90,
-        });
-
-        verificationResult = await verifyImport(sampleRows, {
-          mode: state.config.importMode,
-          matchingColumn: matchingColumns.length > 0 ? matchingColumns[0] : undefined,
-          sampleSize: sampleRows.length,
-          workspaceId: selectedWorkspaceId,
-          viewId: state.config.tableId,
-          delayBeforeRead: 2000,
-        });
-
-        console.log('[Verification] Result:', verificationResult);
-      } catch (verifyError) {
-        console.error('Erreur vérification (non bloquant):', verifyError);
-        // La vérification a échoué mais l'import est réussi
-        verificationResult = {
-          ...EMPTY_VERIFICATION_RESULT,
-          performed: true,
-          errorMessage: verifyError instanceof Error ? verifyError.message : 'Erreur de vérification',
-        };
-      }
-    }
-    // ==================== FIN NOUVEAU ====================
-
-    setImportSuccess({
-      success: true,
-      importId: result.importId || `imp_${Date.now()}`,
-      rowsImported: result.summary?.totalRowCount || validData.length,
-      duration: result.duration || 0,
-      zohoImportId: result.importId,
-      verification: verificationResult, // ← NOUVEAU
-    });
-
-    // Reset des états
-    setParsedData(null);
-    setSchemaValidation(null);
-    setZohoSchema(null);
-    setResolvedIssues(null);
-    setIssuesResolved(false);
-    setSelectedProfile(null);
-    setSelectedMatchResult(null);
-    setDetectedColumns([]);
-    setProfileMode('skip');
-    setVerificationSample([]); // ← NOUVEAU
-  } catch (error) {
-    console.error('Erreur import:', error);
-    setImportError(
-      error instanceof Error ? error.message : "Erreur lors de l'import"
-    );
-  }
-}, [
-  parsedData, 
-  state.config, 
-  state.validation, 
-  selectedWorkspaceId, 
-  profileMode, 
-  saveOrUpdateProfile, 
-  startImport, 
-  updateProgress, 
-  setImportSuccess, 
-  setImportError,
-  matchingColumns,
-  getColumnTypesFromSchema,  // ← NOUVEAU : Ajouter à la liste des dépendances
-]);
-  // ==========================================================================
-  // Handlers pour StepProfile
-  // ==========================================================================
-  const handleProfileSelected = useCallback((profile: ImportProfile, matchResult: ProfileMatchResult) => {
-    console.log('Profile selected:', profile.name);
-    setSelectedProfile(profile);
-    setSelectedMatchResult(matchResult);
-    setProfileMode('existing');
-    
-       setSelectedWorkspaceId(profile.workspaceId);
-    setTable(profile.viewId, profile.viewName);
-    setImportMode(profile.defaultImportMode);
-    setMatchingColumns(profile.matchingColumns || []);
-    
-    if (!matchResult.needsConfirmation) {
-      goToStep('validating');
-    } else {
-      goToStep('configuring');
-    }
-  }, [setTable, setImportMode, goToStep]);
-
-  const handleCreateNewProfile = useCallback((columns: DetectedColumn[]) => {
-    console.log('Create new profile with', columns.length, 'columns');
-    setDetectedColumns(columns);
-    setProfileMode('new');
-    setSelectedProfile(null);
-     setMatchingColumns([]);
-    goToStep('configuring');
-  }, [goToStep]);
-
-  const handleSkipProfile = useCallback((columns: DetectedColumn[]) => {
-    console.log('Skip profile, import ponctuel');
-    setDetectedColumns(columns);
-    setProfileMode('skip');
-    setSelectedProfile(null);
-     setMatchingColumns([]);
-    goToStep('configuring');
-  }, [goToStep]);
-
-  // Handler pour la resolution des issues
-  const handleIssuesResolved = useCallback((resolved: ResolvableIssue[]) => {
-    console.log('Issues resolues:', resolved.length);
-    setResolvedIssues(resolved);
-    setIssuesResolved(true);
-  }, []);
-
-  // Verifier si on doit afficher l etape de resolution
-  const hasUnresolvedIssues = schemaValidation?.resolvableIssues && 
-    schemaValidation.resolvableIssues.length > 0 && 
-    !issuesResolved;
-
-    console.log('[Wizard] hasUnresolvedIssues:', hasUnresolvedIssues);
-console.log('[Wizard] schemaValidation?.resolvableIssues:', schemaValidation?.resolvableIssues?.length);
-console.log('[Wizard] issuesResolved:', issuesResolved);
-
-    // ==========================================================================
-// Handlers pour l'import en 2 phases
-// ==========================================================================
-
-/**
- * Prépare et lance l'import test
- * Mission 013 : Vérifie la synchronisation RowID avant de lancer
- */
-const handleStartTestImport = useCallback(async () => {
-  if (!parsedData || !state.config.tableId || !state.validation) return;
-
-  const currentTableName = state.config.tableName;
-  
-  // ─────────────────────────────────────────────────────────────────────────
-  // Mission 013 : Vérifier la synchronisation RowID avant l'import
-  // ─────────────────────────────────────────────────────────────────────────
-  if (currentTableName && selectedWorkspaceId) {
-    try {
-      console.log('[TestImport] Checking RowID sync...');
-      const syncCheck = await checkSyncBeforeImport(
-        state.config.tableId,
-        currentTableName,
-        selectedWorkspaceId
-      );
-      
-      setRowIdSyncCheck(syncCheck);
-      console.log('[TestImport] Sync check result:', syncCheck);
-
-      if (syncCheck.needsResync) {
-        // Afficher le dialog de resync
-        setShowRowIdSyncDialog(true);
-        return; // Ne pas continuer tant que l'utilisateur n'a pas resync
-      }
-
-      // Utiliser le RowID de début (recalé si nécessaire)
-      const startRowId = syncCheck.actualStartRowId ?? syncCheck.estimatedStartRowId;
-      setRowIdStartForImport(startRowId);
-      rowIdStartForImportRef.current = startRowId;
-      
-      // Aussi mettre à jour maxRowIdBeforeTest pour compatibilité
-      setMaxRowIdBeforeTest(startRowId - 1);
-      maxRowIdBeforeTestRef.current = startRowId - 1;
-      
-      console.log('[TestImport] RowID start for import:', startRowId);
-      
-      if (syncCheck.message && syncCheck.message !== 'Synchronisation OK') {
-        toast.info(syncCheck.message);
-      }
-    } catch (error) {
-      console.warn('[TestImport] Sync check failed, continuing without RowID tracking:', error);
-      // Continuer sans tracking RowID (fallback)
-      setRowIdStartForImport(null);
-      rowIdStartForImportRef.current = null;
-    }
-  }
-  // ─────────────────────────────────────────────────────────────────────────
-
-  // Détecter la colonne de matching si pas encore fait
-  if (!verificationColumn && verificationSample.length > 0) {
-    const result = findBestMatchingColumnEnhanced(verificationSample, {
-      profile: selectedProfile || undefined,
-      zohoSchema: zohoSchema?.columns,
-    });
-    setMatchingColumnResult(result);
-    setVerificationColumn(result.column || null);
-    verificationColumnRef.current = result.column || null;
-  }
-
-  startTestImport();
-}, [parsedData, state.config.tableId, state.config.tableName, state.validation, verificationColumn, verificationSample, selectedProfile, zohoSchema, startTestImport, selectedWorkspaceId]);
-
-/**
- * Mission 013 : Callback après resynchronisation manuelle
- */
-const handleRowIdResync = useCallback(async (rowId: number) => {
-  if (!state.config.tableId || !state.config.tableName || !selectedWorkspaceId) {
-    throw new Error('Configuration manquante');
-  }
-
-  // Sauvegarder la resync dans Supabase
-  await updateSyncAfterImport({
-    zohoTableId: state.config.tableId,
-    tableName: state.config.tableName,
-    workspaceId: selectedWorkspaceId,
-    lastKnownRowid: rowId,
-    source: 'manual',
-  });
-
-  // Mettre à jour les états locaux
-  const startRowId = rowId + 1;
-  setRowIdStartForImport(startRowId);
-  rowIdStartForImportRef.current = startRowId;
-  setMaxRowIdBeforeTest(rowId);
-  maxRowIdBeforeTestRef.current = rowId;
-  
-  setShowRowIdSyncDialog(false);
-  toast.success('Synchronisation effectuée');
-
-  // Continuer avec l'import test
-  if (!verificationColumn && verificationSample.length > 0) {
-    const result = findBestMatchingColumnEnhanced(verificationSample, {
-      profile: selectedProfile || undefined,
-      zohoSchema: zohoSchema?.columns,
-    });
-    setMatchingColumnResult(result);
-    setVerificationColumn(result.column || null);
-    verificationColumnRef.current = result.column || null;
-  }
-
-  startTestImport();
-}, [state.config.tableId, state.config.tableName, selectedWorkspaceId, verificationColumn, verificationSample, selectedProfile, zohoSchema, startTestImport]);
-
-/**
- * Mission 013 : Annulation du dialog de resync
- */
-const handleRowIdResyncCancel = useCallback(() => {
-  setShowRowIdSyncDialog(false);
-  toast.info('Import annulé');
-}, []);
-
-
-
-/**
- * Exécute l'import de l'échantillon test
- */
-const executeTestImport = useCallback(async (): Promise<{ success: boolean; error?: string }> => {
-  if (!parsedData || !state.config.tableId) {
-    return { success: false, error: 'Données manquantes' };
-  }
-
-  try {
-    // Filtrer les données valides
-    const validData = parsedData.filter((_, index) => {
-      const lineNumber = index + 2;
-      return !state.validation!.errors.some((err) => err.line === lineNumber);
-    });
-
-    // Prendre l'échantillon
-    const sampleData = validData.slice(0, testSampleSize);
-
-    // Construire l'échantillon pour vérification
-    const sampleRows: SentRow[] = sampleData.map((row, index) => ({
-      index: index + 2,
-      data: Object.fromEntries(
-        Object.entries(row).map(([k, v]) => [k, String(v ?? '')])
-      ) as Record<string, string>,
-    }));
-
-    // Détecter la colonne de matching si pas encore fait
-    let matchingCol = verificationColumn;
-    if (!matchingCol && sampleRows.length > 0) {
-      const result = findBestMatchingColumnEnhanced(sampleRows, {
-        profile: selectedProfile || undefined,
-        zohoSchema: zohoSchema?.columns,
-      });
-      matchingCol = result.column || null;
-      setVerificationColumn(matchingCol);
-      verificationColumnRef.current = matchingCol;
-      setMatchingColumnResult(result);
-      console.log('[TestImport] Detected matching column:', matchingCol);
-    }
-
-    // Sauvegarder les valeurs de matching pour le rollback
-    if (matchingCol) {
-      const values = sampleRows
-        .map(row => String(row.data[matchingCol!] ?? '').trim())
-        .filter(v => v !== '');
-      setTestMatchingValues(values);
-      testMatchingValuesRef.current = values;
-      console.log('[TestImport] Matching values:', values);
-    }
-
-    // Stocker l'échantillon
-    setVerificationSample(sampleRows);
-    verificationSampleRef.current = sampleRows;
+  }, [
+    state.config.file,
+    state.config.tableId,
+    state.config.tableName,
+    wizardState.workspaces.selectedId,
+    wizardState.profile.selectedProfile,
+    wizardState.schema,
+    wizardState.issues,
+    startValidation,
+    updateProgress,
+    parseFile,
+    fetchZohoSchema,
+    validate,
+    setValidationResult,
+    setValidationError,
+  ]);
 
   // ─────────────────────────────────────────────────────────────────────────
-    // Mission 013 : Le RowID de début a déjà été calculé dans handleStartTestImport
-    // via checkSyncBeforeImport (sondage rapide au lieu de MAX coûteux)
-    // ─────────────────────────────────────────────────────────────────────────
-    const currentTableName = state.config.tableName || null;
-    setTableName(currentTableName);
-    
-    // Les valeurs maxRowIdBeforeTest sont déjà définies par handleStartTestImport
-    console.log('[TestImport] Using pre-calculated RowID start:', rowIdStartForImportRef.current);
+  // Computed values
+  // ─────────────────────────────────────────────────────────────────────────
+  const hasUnresolvedIssues =
+    wizardState.schema.schemaValidation?.resolvableIssues &&
+    wizardState.schema.schemaValidation.resolvableIssues.length > 0 &&
+    !wizardState.issues.issuesResolved;
 
-    // ─────────────────────────────────────────────────────────────────────────
-
-    // Convertir en CSV
-    const csvData = Papa.unparse(sampleData);
-
-    // Envoyer à Zoho avec les types de colonnes
-    const response = await fetch('/api/zoho/import', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        workspaceId: selectedWorkspaceId,
-        tableId: state.config.tableId,
-        tableName: state.config.tableName,
-        importMode: state.config.importMode,
-        csvData: csvData,
-        fileName: state.config.file?.name,
-        totalRows: sampleData.length,
-        matchingColumns: matchingColumns.length > 0 ? matchingColumns : undefined,
-        columnTypes: getColumnTypesFromSchema(),
-      }),
-    });
-
-    const result = await response.json();
-
-    if (!response.ok) {
-      return { success: false, error: result.error || "Erreur lors de l'import test" };
-    }
-
-    return { success: true };
-  } catch (error) {
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Erreur inconnue'
-    };
-  }
-}, [parsedData, state.config, state.validation, testSampleSize, verificationColumn, selectedWorkspaceId, matchingColumns, selectedProfile, zohoSchema, getColumnTypesFromSchema]);
-/**
- * Exécute la vérification après import test
- */
-const executeTestVerification = useCallback(async (): Promise<{ success: boolean; error?: string }> => {
-  // Utiliser la ref pour accès immédiat (le state peut ne pas être à jour)
-  const sampleToVerify = verificationSampleRef.current;
-  
-  if (sampleToVerify.length === 0) {
-    return { success: false, error: 'Pas d\'échantillon à vérifier' };
-  }
-
-  try {
-     const verificationResult = await verifyImport(sampleToVerify, {
-      mode: state.config.importMode,
-      matchingColumn: verificationColumnRef.current || undefined,
-      sampleSize: sampleToVerify.length,
-      workspaceId: selectedWorkspaceId,
-      viewId: state.config.tableId,
-      delayBeforeRead: 2000,
-      // Mission 012 : Support stratégie RowID
-      tableName: tableName || state.config.tableName || undefined,
-      maxRowIdBeforeImport: maxRowIdBeforeTestRef.current ?? undefined,
-    });
-
-    // Créer le résultat du test
-    const testResult: TestImportResult = {
-      success: verificationResult.success,
-      rowsImported: sampleToVerify.length,
-      matchingColumn: verificationColumn || '',
-      matchingValues: testMatchingValues,
-      verification: verificationResult,
-      duration: verificationResult.duration,
-    };
-
-    setTestImportComplete(testResult);
-
-    return { 
-      success: verificationResult.success,
-      error: verificationResult.success ? undefined : 'Anomalies détectées'
-    };
-  } catch (error) {
-    return { 
-      success: false, 
-      error: error instanceof Error ? error.message : 'Erreur de vérification' 
-    };
-  }
-}, [state.config, verificationColumn, selectedWorkspaceId, testMatchingValues, setTestImportComplete]);
-/**
- * Gère le test import complet (appelé par StepTestImport)
- */
-const handleTestComplete = useCallback((success: boolean) => {
-  // Le résultat est déjà set par executeTestVerification via setTestImportComplete
-  console.log('[Wizard] Test import complete, success:', success);
-}, []);
-
-/**
- * Gère les erreurs du test import
- */
-const handleTestError = useCallback((error: string) => {
-  setImportError(error);
-}, [setImportError]);
-
-/**
- * Exécute le rollback - Supporte stratégie RowID et matching_key (Mission 012)
- */
-const handleRollback = useCallback(async (): Promise<RollbackResult> => {
-  // Déterminer la stratégie selon le mode d'import
-  const mode = state.config.importMode;
-  const useRowIdStrategy = 
-    (mode === 'append' || mode === 'truncateadd' || mode === 'onlyadd') &&
-    maxRowIdBeforeTestRef.current !== null;
-
-  console.log('[Rollback] Strategy:', useRowIdStrategy ? 'rowid' : 'matching_key');
-
-  if (useRowIdStrategy) {
-    // ─────────────────────────────────────────────────────────────────────────
-    // Stratégie RowID : Supprimer les lignes avec RowID > maxRowIdBeforeTest
-    // ─────────────────────────────────────────────────────────────────────────
-    console.log('[Rollback] Using RowID strategy, deleting rows after:', maxRowIdBeforeTestRef.current);
-
-    const result = await executeRollback({
-      workspaceId: selectedWorkspaceId,
-      viewId: state.config.tableId,
-      tableName: tableName || state.config.tableName || undefined,
-      rowIdRange: { min: maxRowIdBeforeTestRef.current! },
-      reason: 'user_cancelled',
-    });
-
-    if (result.success) {
-      toast.success(`${result.deletedRows} lignes supprimées de Zoho`);
-      goToStep('previewing');
-      // Reset les états ET les refs
-      setTestMatchingValues([]);
-      testMatchingValuesRef.current = [];
-      setVerificationSample([]);
-      verificationSampleRef.current = [];
-      setMaxRowIdBeforeTest(null);
-      maxRowIdBeforeTestRef.current = null;
-    }
-
-    return result;
-  } else {
-    // ─────────────────────────────────────────────────────────────────────────
-    // Stratégie matching_key : Comportement existant
-    // ─────────────────────────────────────────────────────────────────────────
-    const column = verificationColumnRef.current;
-    const values = testMatchingValuesRef.current;
-
-    console.log('[Rollback] Using matching_key strategy:', { column, values });
-
-    if (!column || values.length === 0) {
-      return {
-        success: false,
-        deletedRows: 0,
-        duration: 0,
-        errorMessage: 'Pas de données à supprimer',
-        remainingValues: values,
-      };
-    }
-
-    const result = await executeRollback({
-      workspaceId: selectedWorkspaceId,
-      viewId: state.config.tableId,
-      matchingColumn: column,
-      matchingValues: values,
-      reason: 'user_cancelled',
-    });
-
-    if (result.success) {
-      toast.success(`${result.deletedRows} lignes supprimées de Zoho`);
-      goToStep('previewing');
-      // Reset les états ET les refs
-      setTestMatchingValues([]);
-      testMatchingValuesRef.current = [];
-      setVerificationSample([]);
-      verificationSampleRef.current = [];
-    }
-
-    return result;
-  }
-}, [selectedWorkspaceId, state.config.tableId, state.config.tableName, state.config.importMode, tableName, goToStep]);
-
-/**
- * Confirme l'import complet après test réussi - VERSION CHUNKING
- */
-const handleConfirmFullImport = useCallback(async () => {
-  if (!parsedData || !state.config.tableId || !state.validation) return;
-
-  startFullImport();
-
-  try {
-    // Filtrer les données valides
-    const validData = parsedData.filter((_, index) => {
-      const lineNumber = index + 2;
-      return !state.validation!.errors.some((err) => err.line === lineNumber);
-    });
-
-    // Prendre les données RESTANTES (après l'échantillon test)
-    const remainingData = validData.slice(testSampleSize);
-
-    if (remainingData.length === 0) {
-      // Toutes les données ont déjà été importées dans le test
-      setImportSuccess({
-        success: true,
-        importId: `imp_${Date.now()}`,
-        rowsImported: testSampleSize,
-        duration: 0,
-        verification: state.testResult?.verification,
-      });
-      return;
-    }
-
-    // ==================== CHUNKING ====================
-    const totalChunks = Math.ceil(remainingData.length / CHUNK_SIZE);
-    let totalImported = 0;
-    const startTime = Date.now();
-
-    console.log(`[Import] Démarrage import par chunks: ${remainingData.length} lignes en ${totalChunks} lot(s) de ${CHUNK_SIZE} lignes max`);
-
-    for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
-      const start = chunkIndex * CHUNK_SIZE;
-      const end = Math.min(start + CHUNK_SIZE, remainingData.length);
-      const chunk = remainingData.slice(start, end);
-
-      // Mise à jour progression avec info chunk
-      const chunkPercentage = Math.round(((chunkIndex + 0.5) / totalChunks) * 100);
-      updateProgress({
-        phase: 'full-importing',
-        current: start + Math.floor(chunk.length / 2),
-        total: remainingData.length,
-        percentage: chunkPercentage,
-        chunk: {
-          current: chunkIndex + 1,
-          total: totalChunks,
-        },
-      });
-
-      console.log(`[Import] Chunk ${chunkIndex + 1}/${totalChunks}: lignes ${start + 1}-${end} (${chunk.length} lignes)`);
-
-      // Convertir en CSV
-      const csvData = Papa.unparse(chunk);
-
-      // Retry loop
-      let success = false;
-      let lastError: string | null = null;
-
-      for (let retry = 0; retry <= MAX_RETRIES && !success; retry++) {
-        if (retry > 0) {
-          console.log(`[Import] Retry ${retry}/${MAX_RETRIES} pour chunk ${chunkIndex + 1}`);
-          // Backoff exponentiel : 1s, 2s
-          await new Promise(resolve => setTimeout(resolve, 1000 * retry));
-        }
-
-        try {
-          const response = await fetch('/api/zoho/import', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              workspaceId: selectedWorkspaceId,
-              tableId: state.config.tableId,
-              tableName: state.config.tableName,
-              importMode: 'append', // Toujours append pour les données restantes
-              csvData: csvData,
-              fileName: state.config.file?.name,
-              totalRows: chunk.length,
-              matchingColumns: matchingColumns.length > 0 ? matchingColumns : undefined,
-              columnTypes: getColumnTypesFromSchema(),
-            }),
-          });
-
-          const result = await response.json();
-
-          if (response.ok && result.success) {
-            success = true;
-            totalImported += chunk.length;
-            console.log(`[Import] Chunk ${chunkIndex + 1} OK: ${chunk.length} lignes importées (total: ${totalImported})`);
-          } else {
-            lastError = result.error || 'Erreur inconnue';
-            console.warn(`[Import] Chunk ${chunkIndex + 1} erreur:`, lastError);
-          }
-        } catch (error) {
-          lastError = error instanceof Error ? error.message : 'Erreur réseau';
-          console.warn(`[Import] Chunk ${chunkIndex + 1} exception:`, lastError);
-        }
-      }
-
-      if (!success) {
-        throw new Error(
-          `Échec à l'import du lot ${chunkIndex + 1}/${totalChunks} (lignes ${start + 1}-${end}): ${lastError}`
-        );
-      }
-
-      // Mise à jour progression après chunk réussi
-      const completedPercentage = Math.round(((chunkIndex + 1) / totalChunks) * 100);
-      updateProgress({
-        phase: 'full-importing',
-        current: end,
-        total: remainingData.length,
-        percentage: completedPercentage,
-        chunk: {
-          current: chunkIndex + 1,
-          total: totalChunks,
-        },
-      });
-    }
-
-    // ==================== FIN CHUNKING ====================
-
-    const duration = Date.now() - startTime;
-    console.log(`[Import] Terminé: ${totalImported} lignes en ${duration}ms (${totalChunks} chunks)`);
-
-   // Sauvegarder/mettre à jour le profil
-    if (profileMode !== 'skip') {
-      try {
-        await saveOrUpdateProfile();
-      } catch (profileError) {
-        console.error('Erreur sauvegarde profil (non bloquant):', profileError);
-      }
-    }
-
-    // Logger l'import dans l'historique
-    const totalRowsImported = testSampleSize + totalImported;
-
-    // Mission 013 : Calculer maxRowIdAfter à partir du RowID de début + nombre de lignes
-    // (évite l'appel API getMax qui timeout sur grosses tables)
-    let maxRowIdAfter: number | null = null;
-    if (rowIdStartForImportRef.current !== null) {
-      maxRowIdAfter = calculateEndRowId(rowIdStartForImportRef.current, totalRowsImported);
-      console.log('[Import] Calculated MAX(RowID) after import:', maxRowIdAfter);
-    }
-
-    try {
-      await fetch('/api/imports', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          workspaceId: selectedWorkspaceId,
-          viewId: state.config.tableId,
-          tableName: state.config.tableName,
-          importMode: state.config.importMode,
-          fileName: state.config.file?.name || 'unknown',
-          fileSizeBytes: state.config.file?.size,
-          rowsTotal: parsedData?.length || 0,
-          rowsValid: state.validation?.validRows || 0,
-          rowsImported: totalRowsImported,
-rowsErrors: state.validation?.errorRows || 0,
-          rowIdBefore: maxRowIdBeforeTestRef.current,
-          rowIdAfter: maxRowIdAfter,
-          matchingColumn: verificationColumnRef.current,
-          chunksCount: totalChunks + 1,
-          durationMs: duration,
-          status: 'success',
-          profileId: selectedProfile?.id,
-        }),
-      });
-      console.log('[Import] Log enregistré dans l\'historique');
-      // ==================== Mission 013: Mettre à jour table_rowid_sync ====================
-      if (state.config.tableId && state.config.tableName && selectedWorkspaceId) {
-        const rowsImportedInFullImport = totalImported; // Sans le test (déjà compté)
-        const totalRowsForSync = testSampleSize + rowsImportedInFullImport;
-        
-        // Calculer le RowID de fin
-        if (rowIdStartForImportRef.current !== null) {
-          const endRowId = calculateEndRowId(rowIdStartForImportRef.current, totalRowsForSync);
-          
-          try {
-            await updateSyncAfterImport({
-              zohoTableId: state.config.tableId,
-              tableName: state.config.tableName,
-              workspaceId: selectedWorkspaceId,
-              lastKnownRowid: endRowId,
-              source: 'import',
-            });
-            console.log('[Import] RowID sync updated:', endRowId);
-          } catch (syncError) {
-            console.warn('[Import] Failed to update RowID sync (non-blocking):', syncError);
-          }
-        }
-      }
-      // ==================== FIN Mission 013 ====================
-    } catch (logError) {
-      console.warn('[Import] Erreur logging (non bloquant):', logError);
-    }
-    // ==================== FIN NOUVEAU ====================
-
-    setImportSuccess({
-      success: true,
-      importId: `imp_${Date.now()}`,
-      rowsImported: totalRowsImported,
-      duration,
-      verification: state.testResult?.verification,
-    });
-
-    // Reset
-    setParsedData(null);
-    setSchemaValidation(null);
-    setZohoSchema(null);
-    setResolvedIssues(null);
-    setIssuesResolved(false);
-    setSelectedProfile(null);
-    setSelectedMatchResult(null);
-    setDetectedColumns([]);
-    setProfileMode('skip');
-    setVerificationSample([]);
-    setTestMatchingValues([]);
-    testMatchingValuesRef.current = [];
-    setVerificationColumn(null);
-    verificationColumnRef.current = null;
-
-  } catch (error) {
-    console.error('Erreur import complet:', error);
-    setImportError(
-      error instanceof Error ? error.message : "Erreur lors de l'import"
-    );
-  }
-}, [
-  parsedData,
-  state.config,
-  state.validation,
-  state.testResult,
-  testSampleSize,
-  selectedWorkspaceId,
-  matchingColumns,
-  profileMode,
-  saveOrUpdateProfile,
-  startFullImport,
-  updateProgress,
-  setImportSuccess,
-  setImportError,
-  getColumnTypesFromSchema,
-  selectedProfile,
-]);
-
-/**
- * Force l'import malgré les anomalies
- */
-const handleForceImport = useCallback(() => {
-  // Lancer l'import complet même avec anomalies
-  handleConfirmFullImport();
-}, [handleConfirmFullImport]);
-
-
+  // ─────────────────────────────────────────────────────────────────────────
+  // Render step
+  // ─────────────────────────────────────────────────────────────────────────
   const renderStep = () => {
     switch (state.status) {
       case 'selecting':
@@ -1378,26 +430,25 @@ const handleForceImport = useCallback(() => {
         );
 
       case 'profiling':
-        if (!parsedData && state.config.file) {
-         parseFile(state.config.file).then(result => {
-  // Appliquer les transformations de base même sans schéma
-  const transformed = applyAllTransformations(result.data as Record<string, unknown>[]);
-  setParsedData(transformed);
-});
+        if (!wizardState.schema.parsedData && state.config.file) {
+          parseFile(state.config.file).then(result => {
+            const transformed = applyAllTransformations(result.data as Record<string, unknown>[]);
+            wizardState.schema.setParsedData(transformed);
+          });
           return <div className="text-center p-8">Analyse du fichier en cours...</div>;
         }
-        
-        if (!parsedData) {
-          return <div className="text-center p-8">Aucune donnee a analyser</div>;
+
+        if (!wizardState.schema.parsedData) {
+          return <div className="text-center p-8">Aucune donnée à analyser</div>;
         }
-        
+
         return (
           <StepProfile
-            fileData={(parsedData as Record<string, string>[])}
+            fileData={wizardState.schema.parsedData as Record<string, string>[]}
             fileName={state.config.file?.name || ''}
-            onProfileSelected={handleProfileSelected}
-            onCreateNewProfile={handleCreateNewProfile}
-            onSkipProfile={handleSkipProfile}
+            onProfileSelected={profileActions.handleProfileSelected}
+            onCreateNewProfile={profileActions.handleCreateNewProfile}
+            onSkipProfile={profileActions.handleSkipProfile}
             onBack={goBack}
           />
         );
@@ -1405,24 +456,24 @@ const handleForceImport = useCallback(() => {
       case 'configuring':
         return (
           <>
-            {workspacesError && (
+            {wizardState.workspaces.error && (
               <Alert variant="error" className="mb-4">
-                {workspacesError}
+                {wizardState.workspaces.error}
               </Alert>
             )}
 
-            {profileMode === 'existing' && selectedProfile && (
-             <Alert variant="info" className="mb-4">
-                Profil &quot;{selectedProfile.name}&quot; selectionne - Table: {selectedProfile.viewName}
+            {wizardState.profile.mode === 'existing' && wizardState.profile.selectedProfile && (
+              <Alert variant="info" className="mb-4">
+                Profil &quot;{wizardState.profile.selectedProfile.name}&quot; sélectionné - Table: {wizardState.profile.selectedProfile.viewName}
               </Alert>
             )}
 
-           <StepConfig
+            <StepConfig
               fileName={state.config.file?.name ?? ''}
               fileSize={state.config.file?.size ?? 0}
-              workspaces={workspaces}
-              selectedWorkspaceId={selectedWorkspaceId}
-              isLoadingWorkspaces={isLoadingWorkspaces}
+              workspaces={wizardState.workspaces.workspaces}
+              selectedWorkspaceId={wizardState.workspaces.selectedId}
+              isLoadingWorkspaces={wizardState.workspaces.isLoading}
               onWorkspaceSelect={handleWorkspaceChange}
               selectedTableId={state.config.tableId}
               importMode={state.config.importMode}
@@ -1430,10 +481,10 @@ const handleForceImport = useCallback(() => {
               onImportModeChange={setImportMode}
               onBack={goBack}
               onNext={() => goToStep('validating')}
-              canProceed={canGoNext && !!selectedWorkspaceId}
-              matchingColumns={matchingColumns}
-              onMatchingColumnsChange={setMatchingColumns}
-              availableColumns={detectedColumns.map(c => c.name)}
+              canProceed={canGoNext && !!wizardState.workspaces.selectedId}
+              matchingColumns={wizardState.profile.matchingColumns}
+              onMatchingColumnsChange={wizardState.profile.setMatchingColumns}
+              availableColumns={wizardState.profile.detectedColumns.map(c => c.name)}
             />
           </>
         );
@@ -1447,24 +498,24 @@ const handleForceImport = useCallback(() => {
           />
         );
 
-        case 'previewing':
+      case 'previewing':
         return (
           <StepTransformPreview
-            autoTransformations={schemaValidation?.autoTransformations || []}
-            matchedColumns={schemaValidation?.matchedColumns || []}
-            parsedData={parsedData || []}
+            autoTransformations={wizardState.schema.schemaValidation?.autoTransformations || []}
+            matchedColumns={wizardState.schema.schemaValidation?.matchedColumns || []}
+            parsedData={wizardState.schema.parsedData || []}
             totalRows={state.validation?.totalRows || 0}
-            zohoReferenceRow={zohoReferenceRow}
+            zohoReferenceRow={wizardState.schema.zohoReferenceRow}
             onBack={() => goToStep('configuring')}
             onConfirm={() => goToStep('reviewing')}
           />
         );
 
-     case 'reviewing':
-        if (hasUnresolvedIssues && schemaValidation?.resolvableIssues) {
+      case 'reviewing':
+        if (hasUnresolvedIssues && wizardState.schema.schemaValidation?.resolvableIssues) {
           return (
             <StepResolve
-              issues={schemaValidation.resolvableIssues}
+              issues={wizardState.schema.schemaValidation.resolvableIssues}
               onResolve={handleIssuesResolved}
               onBack={goBack}
             />
@@ -1474,57 +525,60 @@ const handleForceImport = useCallback(() => {
         return state.validation ? (
           <StepReview
             validation={state.validation}
-            schemaValidation={schemaValidation}
+            schemaValidation={wizardState.schema.schemaValidation}
             tableName={state.config.tableName}
             importMode={state.config.importMode}
-            isImporting={isImporting || isTestImporting}  // ← MODIFIÉ
+            isImporting={isImporting || isTestImporting}
             onBack={() => {
-              if (resolvedIssues && schemaValidation?.resolvableIssues && schemaValidation.resolvableIssues.length > 0) {
-                setIssuesResolved(false);
+              if (
+                wizardState.issues.resolvedIssues &&
+                wizardState.schema.schemaValidation?.resolvableIssues &&
+                wizardState.schema.schemaValidation.resolvableIssues.length > 0
+              ) {
+                wizardState.issues.setIssuesResolved(false);
               } else {
                 goBack();
               }
             }}
-            onImport={handleStartTestImport}  // ← MODIFIÉ : lance le test au lieu de l'import direct
-            resolvedIssues={resolvedIssues || []}
+            onImport={testImportActions.handleStartTestImport}
+            resolvedIssues={wizardState.issues.resolvedIssues || []}
           />
         ) : null;
 
-        // ==================== NOUVEAU : Étapes 2 phases ====================
       case 'test-importing':
         return (
           <StepTestImport
-            sampleSize={testSampleSize}
-            matchingColumn={verificationColumn}
-            matchingValues={testMatchingValues}
-            onComplete={handleTestComplete}
-            onError={handleTestError}
-            executeImport={executeTestImport}
-            executeVerification={executeTestVerification}
+            sampleSize={wizardState.testImport.sampleSize}
+            matchingColumn={wizardState.testImport.verificationColumn}
+            matchingValues={wizardState.testImport.testMatchingValues}
+            onComplete={testImportActions.handleTestComplete}
+            onError={testImportActions.handleTestError}
+            executeImport={testImportActions.executeTestImport}
+            executeVerification={testImportActions.executeTestVerification}
           />
         );
 
       case 'test-result':
         if (!state.testResult) return null;
-        
-        const totalValidRows = parsedData 
-          ? parsedData.filter((_, index) => {
+
+        const totalValidRows = wizardState.schema.parsedData
+          ? wizardState.schema.parsedData.filter((_, index) => {
               const lineNumber = index + 2;
               return !state.validation!.errors.some((err) => err.line === lineNumber);
             }).length
           : 0;
-        const remainingRows = totalValidRows - testSampleSize;
+        const remainingRows = totalValidRows - wizardState.testImport.sampleSize;
 
         return (
           <StepTestResult
             verificationResult={state.testResult.verification}
-            sampleSize={testSampleSize}
+            sampleSize={wizardState.testImport.sampleSize}
             remainingRows={remainingRows}
-            matchingColumn={verificationColumn || ''}
-            matchingValues={testMatchingValues}
-            onConfirmFullImport={handleConfirmFullImport}
-            onRollbackAndFix={handleRollback}
-            onForceImport={handleForceImport}
+            matchingColumn={wizardState.testImport.verificationColumn || ''}
+            matchingValues={wizardState.testImport.testMatchingValues}
+            onConfirmFullImport={chunkedImportActions.handleConfirmFullImport}
+            onRollbackAndFix={testImportActions.handleRollback}
+            onForceImport={chunkedImportActions.handleForceImport}
           />
         );
 
@@ -1536,7 +590,6 @@ const handleForceImport = useCallback(() => {
             onValidationStart={() => {}}
           />
         );
-      // ==================== FIN NOUVEAU ====================
 
       case 'importing':
         return (
@@ -1578,6 +631,9 @@ const handleForceImport = useCallback(() => {
     }
   };
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // Render
+  // ─────────────────────────────────────────────────────────────────────────
   return (
     <div className={`space-y-8 ${className}`}>
       {!['success', 'error'].includes(state.status) && (
@@ -1585,19 +641,23 @@ const handleForceImport = useCallback(() => {
       )}
 
       {/* Mission 013 : Dialog de resynchronisation RowID */}
-      {showRowIdSyncDialog && state.config.tableName && (
+      {wizardState.rowId.showSyncDialog && state.config.tableName && (
         <RowIdSyncDialog
           tableName={state.config.tableName}
-          workspaceId={selectedWorkspaceId}
+          workspaceId={wizardState.workspaces.selectedId}
           zohoTableId={state.config.tableId || ''}
-          estimatedRowId={rowIdSyncCheck?.estimatedStartRowId ? rowIdSyncCheck.estimatedStartRowId - 1 : undefined}
-          message={rowIdSyncCheck?.message || 'Synchronisation requise'}
-          onSync={handleRowIdResync}
-          onCancel={handleRowIdResyncCancel}
+          estimatedRowId={
+            wizardState.rowId.syncCheck?.estimatedStartRowId
+              ? wizardState.rowId.syncCheck.estimatedStartRowId - 1
+              : undefined
+          }
+          message={wizardState.rowId.syncCheck?.message || 'Synchronisation requise'}
+          onSync={testImportActions.handleRowIdResync}
+          onCancel={testImportActions.handleRowIdResyncCancel}
         />
       )}
 
-      {!showRowIdSyncDialog && renderStep()}
+      {!wizardState.rowId.showSyncDialog && renderStep()}
     </div>
   );
 }
