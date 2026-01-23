@@ -1,14 +1,16 @@
 /**
  * @file app/api/zoho/verify-by-rowid/route.ts
- * @description API pour vérification optimisée via RowID (tables volumineuses)
- * 
+ * @description API pour vérification post-import via RowID (tables volumineuses)
+ *
  * Utilise l'API Bulk async de Zoho pour supporter les grosses tables (2M+ lignes)
- * 
- * Actions supportées :
- * - getMax : Récupère MAX(RowID) de la table
+ *
+ * Action supportée :
  * - getAfter : Récupère les lignes avec RowID > minRowId
- * - getLatest : Récupère les N dernières lignes (ORDER BY RowID DESC)
- * 
+ *
+ * Actions supprimées :
+ * - getMax : timeout sur grosses tables (remplacé par probe-service)
+ * - getLatest : non utilisé
+ *
  * @mission 012
  */
 
@@ -153,35 +155,22 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // 3. Construire la requête SQL selon l'action
-    let sqlQuery: string;
-
-    switch (action) {
-      case 'getMax':
-        sqlQuery = `SELECT MAX("RowID") as "maxRowId" FROM "${tableName}"`;
-        break;
-
-      case 'getAfter':
-        if (!minRowId) {
-          return NextResponse.json(
-            { error: 'minRowId requis pour action getAfter' },
-            { status: 400 }
-          );
-        }
-        sqlQuery = `SELECT * FROM "${tableName}" WHERE "RowID" > ${minRowId} ORDER BY "RowID" ASC LIMIT ${limit}`;
-        break;
-
-      case 'getLatest':
-        sqlQuery = `SELECT * FROM "${tableName}" ORDER BY "RowID" DESC LIMIT ${limit}`;
-        break;
-
-      default:
-        return NextResponse.json(
-          { error: `Action invalide: ${action}` },
-          { status: 400 }
-        );
+    // 3. Seule action supportée : getAfter
+    if (action !== 'getAfter') {
+      return NextResponse.json(
+        { error: `Action invalide: ${action}. Seule 'getAfter' est supportée.` },
+        { status: 400 }
+      );
     }
 
+    if (!minRowId) {
+      return NextResponse.json(
+        { error: 'minRowId requis pour action getAfter' },
+        { status: 400 }
+      );
+    }
+
+    const sqlQuery = `SELECT * FROM "${tableName}" WHERE "RowID" > ${minRowId} ORDER BY "RowID" ASC LIMIT ${limit}`;
     console.log('[VerifyByRowID] SQL:', sqlQuery);
 
     const apiDomain = convertToAnalyticsDomain(tokens.apiDomain);
@@ -243,11 +232,11 @@ export async function GET(request: NextRequest) {
       }, { status: 500 });
     }
 
-    console.log('[VerifyByRowID] Success -', action, '- rows:', result.data?.length);
+    console.log('[VerifyByRowID] Success - getAfter - rows:', result.data?.length);
 
     return NextResponse.json({
       success: true,
-      action,
+      action: 'getAfter',
       data: result.data,
       rowCount: result.data?.length || 0,
     });

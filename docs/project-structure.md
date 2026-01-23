@@ -1,6 +1,6 @@
 ﻿# Structure du projet - csv-zoho-importer
 
-*Genere le 2026-01-23 06:20:59*
+*Genere le 2026-01-23 10:04:12*
 ```
 csv-zoho-importer/
 |-- .vscode/
@@ -44,23 +44,17 @@ csv-zoho-importer/
 |   |   |   +-- route.ts
 |   |   |-- rules/
 |   |   +-- zoho/
-|   |       |-- async-export/
-|   |       |   +-- route.ts
 |   |       |-- columns/
 |   |       |   +-- route.ts
 |   |       |-- dashboard-embed/
 |   |       |   +-- route.ts
 |   |       |-- dashboard-pdf/
 |   |       |   +-- route.ts
-|   |       |-- data/
-|   |       |   +-- route.ts
 |   |       |-- delete/
 |   |       |   +-- route.ts
 |   |       |-- folders/
 |   |       |   +-- route.ts
 |   |       |-- import/
-|   |       |   +-- route.ts
-|   |       |-- list-views/
 |   |       |   +-- route.ts
 |   |       |-- oauth/
 |   |       |   |-- authorize/
@@ -69,11 +63,7 @@ csv-zoho-importer/
 |   |       |   +-- status/
 |   |       |-- sample-row/
 |   |       |   +-- route.ts
-|   |       |-- sql-query/
-|   |       |   +-- route.ts
 |   |       |-- tables/
-|   |       |   +-- route.ts
-|   |       |-- test-private-url/
 |   |       |   +-- route.ts
 |   |       |-- verify-by-rowid/
 |   |       |   +-- route.ts
