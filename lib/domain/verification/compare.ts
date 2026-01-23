@@ -253,31 +253,15 @@ async function fetchRowsFromZoho(
         return result.data || [];
       }
 
-      console.warn('[Verification] Async API failed, trying sync fallback:', result.error);
+      console.warn('[Verification] Async API failed:', result.error);
     }
   } catch (asyncError) {
-    console.warn('[Verification] Async API error, trying sync fallback:', asyncError);
+    console.warn('[Verification] Async API error:', asyncError);
   }
 
-  // Fallback vers l'API synchrone (pour les petites tables)
-  console.log('[Verification] Using sync API fallback');
-  const criteria = buildInCriteria(matchingColumn, matchingValues);
-
-  const params = new URLSearchParams({
-    workspaceId: config.workspaceId,
-    viewId: config.viewId,
-    criteria: criteria,
-    limit: String(config.sampleSize * 2),
-  });
-
-  const response = await fetch(`/api/zoho/data?${params.toString()}`);
-  const result = await response.json();
-
-  if (!response.ok || !result.success) {
-    throw new Error(result.error || 'Erreur lors de la lecture des données Zoho');
-  }
-
-  return result.data || [];
+  // L'API async est requise pour supporter les grosses tables
+  // Si elle échoue, on ne peut pas utiliser de fallback sync (timeout)
+  throw new Error('Impossible de récupérer les données pour vérification. Vérifiez que tableName est disponible.');
 }
 
 /**
