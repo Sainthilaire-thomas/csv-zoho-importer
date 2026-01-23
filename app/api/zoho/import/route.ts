@@ -197,8 +197,9 @@ async function logImportMetadata(
 ) {
   // Utiliser le client avec le schéma csv_importer
   const { error } = await supabase
-    .from('import_logs')
-    .insert({
+  .schema('csv_importer')
+  .from('import_logs')
+  .insert({
       user_id: data.userId,
       zoho_table_id: data.tableId,
       file_name: data.fileName || 'import.csv',
