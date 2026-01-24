@@ -1,6 +1,6 @@
 ﻿# Structure du projet - csv-zoho-importer
 
-*Genere le 2026-01-24 16:09:02*
+*Genere le 2026-01-24 19:04:35*
 ```
 csv-zoho-importer/
 |-- .vscode/
@@ -166,6 +166,7 @@ csv-zoho-importer/
 |   |   |   |-- mission-017-excel-metadata.md
 |   |   |   |-- mission-017-excel-metadata-v2.md
 |   |   |   |-- mission-017-excel-metadata-v3.md
+|   |   |   |-- mission-017-excel-metadata-v4.md
 |   |   |   +-- TEMPLATE-MISSION.md
 |   |   |-- base-context.md
 |   |   |-- README.md
@@ -192,6 +193,9 @@ csv-zoho-importer/
 |   |   |-- detection/
 |   |   |   |-- index.ts
 |   |   |   +-- type-detector.ts
+|   |   |-- excel/
+|   |   |   |-- date-converter.ts
+|   |   |   +-- index.ts
 |   |   |-- file-provider/
 |   |   |-- history/
 |   |   |   |-- index.ts
