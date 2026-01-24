@@ -45,8 +45,11 @@ interface StepProfileProps {
   fileData: Record<string, string>[];
   fileName: string;
   
+  // Métadonnées Excel (optionnel, absent pour CSV)
+  columnMetadata?: Record<string, import('@/types/profiles').ExcelColumnMeta> | null;
+
   // Callbacks
-  onProfileSelected: (profile: ImportProfile, matchResult: ProfileMatchResult) => void;
+ onProfileSelected: (profile: ImportProfile, matchResult: ProfileMatchResult, detectedColumns: DetectedColumn[]) => void;
   onCreateNewProfile: (detectedColumns: DetectedColumn[]) => void;
   onSkipProfile: (detectedColumns: DetectedColumn[]) => void;
   onBack: () => void;
@@ -61,6 +64,7 @@ type ViewMode = 'loading' | 'matches' | 'no-match' | 'error';
 export function StepProfile({
   fileData,
   fileName,
+  columnMetadata,  // AJOUTER
   onProfileSelected,
   onCreateNewProfile,
   onSkipProfile,
@@ -87,9 +91,10 @@ export function StepProfile({
     setError(null);
 
     try {
-      // 1. Détecter les types de colonnes
-      const columns = detectColumnTypes(fileData);
-      setDetectedColumns(columns);
+       // 1. Détecter les types de colonnes (avec métadonnées Excel si disponibles)
+      const columns = detectColumnTypes(fileData, { 
+        excelMetadata: columnMetadata ?? undefined 
+      });
 
       // 2. Chercher les profils compatibles
       const matches = await profileManager.findMatchingProfiles(columns);
@@ -111,7 +116,7 @@ export function StepProfile({
 
   function handleUseProfile() {
     if (selectedMatch) {
-      onProfileSelected(selectedMatch.profile, selectedMatch);
+      onProfileSelected(selectedMatch.profile, selectedMatch, detectedColumns);
     }
   }
 

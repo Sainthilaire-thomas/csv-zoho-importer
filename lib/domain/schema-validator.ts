@@ -31,6 +31,7 @@ interface ValidateSchemaParams {
   sampleData: string[][];
   zohoSchema: ZohoSchema;
   profile?: ImportProfile;  // Profil pour skip les issues connues
+  detectedColumns?: import('@/types/profiles').DetectedColumn[];  // Pour les hints Excel
 }
 
 // ==================== DÉTECTION DES FORMATS ====================
@@ -629,7 +630,8 @@ export function detectResolvableIssues(
   fileHeaders: string[],
   sampleData: string[][],
   matchedColumns: ColumnMapping[],
-  profile?: ImportProfile
+  profile?: ImportProfile,
+  detectedColumns?: import('@/types/profiles').DetectedColumn[]
 ): ResolvableIssue[] {
   const issues: ResolvableIssue[] = [];
   
@@ -663,14 +665,18 @@ export function detectResolvableIssues(
         }
         
         if (!formatKnownInProfile) {
-          issues.push({
-            id: generateIssueId(),
-            type: 'ambiguous_date_format',
-            column: fileCol,
-            message: `Format de date ambigu détecté. Est-ce JJ/MM/AAAA ou MM/JJ/AAAA ?`,
-            sampleValues: ambiguousSamples,
-            resolved: false,
-          });
+            // Chercher le hint Excel pour cette colonne
+            const detectedCol = detectedColumns?.find(c => c.name === fileCol);
+            
+            issues.push({
+              id: generateIssueId(),
+              type: 'ambiguous_date_format',
+              column: fileCol,
+              message: `Format de date ambigu détecté. Est-ce JJ/MM/AAAA ou MM/JJ/AAAA ?`,
+              sampleValues: ambiguousSamples,
+              resolved: false,
+              excelHint: detectedCol?.excelHint,
+            });
         } else {
           console.log(`[Schema] Format date connu pour "${fileCol}", skip issue`);
         }
@@ -822,7 +828,7 @@ export function validateSchema(params: ValidateSchemaParams): SchemaValidationRe
   const autoTransformations = detectAutoTransformations(fileHeaders, sampleData, matchedColumns);
   
   // 4. Détecter les problèmes résolubles (⚠️ bloquant)
-  const resolvableIssues = detectResolvableIssues(fileHeaders, sampleData, matchedColumns, params.profile);
+  const resolvableIssues = detectResolvableIssues(fileHeaders, sampleData, matchedColumns, params.profile, params.detectedColumns);
   console.log('[validateSchema] resolvableIssues:', resolvableIssues.length);
   
   // 5. Calculer le résumé

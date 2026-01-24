@@ -31,10 +31,12 @@ export interface WorkspacesState {
 
 export interface SchemaState {
   parsedData: Record<string, unknown>[] | null;
+  columnMetadata: Record<string, import('@/types/profiles').ExcelColumnMeta> | null;  // NOUVEAU
   schemaValidation: SchemaValidationResult | null;
   zohoSchema: ZohoTableSchema | null;
   zohoReferenceRow: Record<string, unknown> | null;
   setParsedData: (data: Record<string, unknown>[] | null) => void;
+  setColumnMetadata: (metadata: Record<string, import('@/types/profiles').ExcelColumnMeta> | null) => void;  // NOUVEAU
   setSchemaValidation: (result: SchemaValidationResult | null) => void;
   setZohoSchema: (schema: ZohoTableSchema | null) => void;
   setZohoReferenceRow: (row: Record<string, unknown> | null) => void;
@@ -120,12 +122,12 @@ export function useImportWizardState(): ImportWizardState {
   const [workspacesError, setWorkspacesError] = useState<string | null>(null);
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string>('');
 
-  // ─────────────────────────────────────────────────────────────────────────
+ // ─────────────────────────────────────────────────────────────────────────
   // Schema & Parsed Data
   // ─────────────────────────────────────────────────────────────────────────
   const [parsedData, setParsedData] = useState<Record<string, unknown>[] | null>(null);
-  const [schemaValidation, setSchemaValidation] = useState<SchemaValidationResult | null>(null);
-  const [zohoSchema, setZohoSchema] = useState<ZohoTableSchema | null>(null);
+  const [columnMetadata, setColumnMetadata] = useState<Record<string, import('@/types/profiles').ExcelColumnMeta> | null>(null);  // NOUVEAU
+  const [schemaValidation, setSchemaValidation] = useState<SchemaValidationResult | null>(null);const [zohoSchema, setZohoSchema] = useState<ZohoTableSchema | null>(null);
   const [zohoReferenceRow, setZohoReferenceRow] = useState<Record<string, unknown> | null>(null);
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -210,6 +212,7 @@ export function useImportWizardState(): ImportWizardState {
   const resetAll = useCallback(() => {
     // Schema
     setParsedData(null);
+     setColumnMetadata(null); 
     setSchemaValidation(null);
     setZohoSchema(null);
     setZohoReferenceRow(null);
@@ -240,10 +243,12 @@ export function useImportWizardState(): ImportWizardState {
 
     schema: {
       parsedData,
+      columnMetadata,  // NOUVEAU
       schemaValidation,
       zohoSchema,
       zohoReferenceRow,
       setParsedData,
+      setColumnMetadata,  // NOUVEAU
       setSchemaValidation,
       setZohoSchema,
       setZohoReferenceRow,

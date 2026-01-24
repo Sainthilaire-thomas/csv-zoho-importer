@@ -32,36 +32,41 @@ interface StepResolveProps {
 /**
  * Résolution pour les dates ambiguës (DD/MM vs MM/DD)
  */
-function DateFormatResolver({ 
-  issue, 
-  onResolve 
-}: { 
-  issue: ResolvableIssue; 
+function DateFormatResolver({
+  issue,
+  onResolve
+}: {
+  issue: ResolvableIssue;
   onResolve: (resolution: IssueResolution) => void;
 }) {
-  const [selectedFormat, setSelectedFormat] = useState<DateFormatOption | null>(null);
+  // Pré-sélectionner le format suggéré par Excel si disponible et confiance haute
+  const defaultFormat = issue.excelHint?.confidence === 'high' 
+    ? issue.excelHint.suggestedFormat as DateFormatOption 
+    : null;
+  
+  const [selectedFormat, setSelectedFormat] = useState<DateFormatOption | null>(defaultFormat);
   const [applyToAll, setApplyToAll] = useState(true);
 
   const sampleValue = issue.sampleValues[0] || '05/03/2025';
   const parts = sampleValue.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  
+
   let ddmmInterpretation = '';
   let mmddInterpretation = '';
-  
+
   if (parts) {
     const [, first, second, year] = parts;
     const ddmmDate = new Date(parseInt(year), parseInt(second) - 1, parseInt(first));
-    ddmmInterpretation = ddmmDate.toLocaleDateString('fr-FR', { 
-      day: 'numeric', 
-      month: 'long', 
-      year: 'numeric' 
+    ddmmInterpretation = ddmmDate.toLocaleDateString('fr-FR', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric'
     });
-    
+
     const mmddDate = new Date(parseInt(year), parseInt(first) - 1, parseInt(second));
-    mmddInterpretation = mmddDate.toLocaleDateString('fr-FR', { 
-      day: 'numeric', 
-      month: 'long', 
-      year: 'numeric' 
+    mmddInterpretation = mmddDate.toLocaleDateString('fr-FR', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric'
     });
   }
 
@@ -77,6 +82,36 @@ function DateFormatResolver({
 
   return (
     <div className="space-y-4">
+      {/* Hint Excel si disponible */}
+      {issue.excelHint && (
+        <div className="bg-blue-50 dark:bg-blue-950/30 p-3 rounded-lg border border-blue-200 dark:border-blue-800">
+          <div className="flex items-start gap-2">
+            <svg className="w-5 h-5 text-blue-500 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <div>
+              <p className="text-sm font-medium text-blue-800 dark:text-blue-200">
+                Suggestion Excel
+              </p>
+              <p className="text-sm text-blue-700 dark:text-blue-300">
+                Le fichier Excel indique que cette colonne utilise le format{' '}
+                <strong>{issue.excelHint.suggestedFormat}</strong>
+                {issue.excelHint.confidence === 'high' && (
+                  <span className="ml-1 text-xs bg-blue-200 dark:bg-blue-800 px-1.5 py-0.5 rounded">
+                    confiance élevée
+                  </span>
+                )}
+                {issue.excelHint.confidence === 'medium' && (
+                  <span className="ml-1 text-xs bg-yellow-200 dark:bg-yellow-800 px-1.5 py-0.5 rounded">
+                    confiance moyenne
+                  </span>
+                )}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="bg-amber-50 dark:bg-amber-950/30 p-3 rounded-lg">
         <p className="text-sm text-amber-800 dark:text-amber-200">
           <strong>Exemple :</strong> &quot;{sampleValue}&quot;
@@ -84,7 +119,9 @@ function DateFormatResolver({
       </div>
 
       <div className="space-y-3">
-        <label className="flex items-start gap-3 p-3 border rounded-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+        <label className={`flex items-start gap-3 p-3 border rounded-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors ${
+          issue.excelHint?.suggestedFormat === 'DD/MM/YYYY' ? 'border-blue-300 dark:border-blue-700 bg-blue-50/50 dark:bg-blue-950/20' : ''
+        }`}>
           <input
             type="radio"
             name={`date-format-${issue.id}`}
@@ -93,15 +130,24 @@ function DateFormatResolver({
             onChange={() => setSelectedFormat('DD/MM/YYYY')}
             className="mt-1"
           />
-          <div>
-            <p className="font-medium">JJ/MM/AAAA (format français)</p>
+          <div className="flex-1">
+            <p className="font-medium">
+              JJ/MM/AAAA (format français)
+              {issue.excelHint?.suggestedFormat === 'DD/MM/YYYY' && (
+                <span className="ml-2 text-xs text-blue-600 dark:text-blue-400">
+                  ← Suggéré par Excel
+                </span>
+              )}
+            </p>
             <p className="text-sm text-gray-500">
               &quot;{sampleValue}&quot; → <strong>{ddmmInterpretation}</strong>
             </p>
           </div>
         </label>
 
-        <label className="flex items-start gap-3 p-3 border rounded-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+        <label className={`flex items-start gap-3 p-3 border rounded-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors ${
+          issue.excelHint?.suggestedFormat === 'MM/DD/YYYY' ? 'border-blue-300 dark:border-blue-700 bg-blue-50/50 dark:bg-blue-950/20' : ''
+        }`}>
           <input
             type="radio"
             name={`date-format-${issue.id}`}
@@ -110,8 +156,15 @@ function DateFormatResolver({
             onChange={() => setSelectedFormat('MM/DD/YYYY')}
             className="mt-1"
           />
-          <div>
-            <p className="font-medium">MM/JJ/AAAA (format américain)</p>
+          <div className="flex-1">
+            <p className="font-medium">
+              MM/JJ/AAAA (format américain)
+              {issue.excelHint?.suggestedFormat === 'MM/DD/YYYY' && (
+                <span className="ml-2 text-xs text-blue-600 dark:text-blue-400">
+                  ← Suggéré par Excel
+                </span>
+              )}
+            </p>
             <p className="text-sm text-gray-500">
               &quot;{sampleValue}&quot; → <strong>{mmddInterpretation}</strong>
             </p>
@@ -128,12 +181,14 @@ function DateFormatResolver({
         Appliquer à toutes les colonnes de type date
       </label>
 
-      <Button 
-        onClick={handleConfirm} 
+      <Button
+        onClick={handleConfirm}
         disabled={!selectedFormat}
         className="w-full"
       >
-        Confirmer le format
+        {issue.excelHint && selectedFormat === issue.excelHint.suggestedFormat 
+          ? 'Confirmer la suggestion Excel' 
+          : 'Confirmer le format'}
       </Button>
     </div>
   );

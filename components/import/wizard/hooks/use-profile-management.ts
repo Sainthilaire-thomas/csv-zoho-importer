@@ -36,7 +36,7 @@ export interface ProfileManagementConfig {
 
 export interface ProfileManagementActions {
   /** Sélectionne un profil existant */
-  handleProfileSelected: (profile: ImportProfile, matchResult: ProfileMatchResult) => void;
+  handleProfileSelected: (profile: ImportProfile, matchResult: ProfileMatchResult, detectedColumns: DetectedColumn[]) => void;
   /** Crée un nouveau profil */
   handleCreateNewProfile: (columns: DetectedColumn[]) => void;
   /** Skip le profil (import ponctuel) */
@@ -64,17 +64,19 @@ export function useProfileManagement(config: ProfileManagementConfig): ProfileMa
   // ─────────────────────────────────────────────────────────────────────────
 const handleProfileSelected = useCallback((
   profile: ImportProfile,
-  matchResult: ProfileMatchResult
+  matchResult: ProfileMatchResult,
+  detectedColumns: DetectedColumn[]
 ) => {
   console.log('[ProfileManagement] Profile selected:', profile.name);
   
   profileState.setSelectedProfile(profile);
   profileState.setSelectedMatchResult(matchResult);
+  profileState.setDetectedColumns(detectedColumns);  // AJOUTER - stocker les colonnes détectées
   profileState.setMode('existing');
   profileState.setMatchingColumns(profile.matchingColumns || []);
 
-  // Pré-remplir la configuration - AJOUTER setWorkspaceId
-  navigation.setWorkspaceId(profile.workspaceId);  // ← AJOUTER
+  // Pré-remplir la configuration
+  navigation.setWorkspaceId(profile.workspaceId);
   navigation.setTable(profile.viewId, profile.viewName);
   navigation.setImportMode(profile.defaultImportMode);
 

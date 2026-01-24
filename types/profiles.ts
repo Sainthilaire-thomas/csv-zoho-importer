@@ -149,6 +149,43 @@ export interface BooleanColumnConfig {
 }
 
 // =============================================================================
+// MÉTADONNÉES EXCEL
+// =============================================================================
+
+/**
+ * Métadonnées extraites d'une colonne Excel
+ * Permet de suggérer le format à l'utilisateur
+ */
+export interface ExcelColumnMeta {
+  // Type dominant de la colonne (le plus fréquent parmi les cellules)
+  dominantCellType: 'string' | 'number' | 'date' | 'boolean' | 'mixed';
+  
+  // Format Excel brut (ex: "dd/mm/yyyy", "#,##0.00")
+  rawExcelFormat?: string;
+  
+  // Format normalisé pour notre système (ex: "DD/MM/YYYY", "fr")
+  normalizedFormat?: string;
+  
+  // Échantillons de valeurs formatées (ce que l'utilisateur voit dans Excel)
+  formattedSamples: string[];
+  
+  // Fiabilité de l'information
+  // - high: >90% des cellules ont le même type/format
+  // - medium: 70-90% cohérent
+  // - low: <70% ou format non reconnu
+  confidence: 'high' | 'medium' | 'low';
+}
+
+/**
+ * Hint Excel pour guider la résolution d'ambiguïté
+ */
+export interface ExcelHint {
+  suggestedFormat: string;      // Format normalisé suggéré ("DD/MM/YYYY")
+  rawExcelFormat: string;       // Format brut Excel ("dd/mm/yyyy")
+  confidence: 'high' | 'medium' | 'low';
+}
+
+// =============================================================================
 // DÉTECTION DE COLONNES (fichier source)
 // =============================================================================
 
@@ -158,22 +195,25 @@ export interface BooleanColumnConfig {
 export interface DetectedColumn {
   name: string;
   index: number;
-  
+
   // Type détecté automatiquement
   detectedType: DetectedType;
   confidence: number;                 // 0-100
-  
+
   // Format détecté
   detectedFormat?: string;            // "DD/MM/YYYY", "HH:mm", etc.
-  
+
   // Échantillons pour prévisualisation
   samples: string[];                  // 5 valeurs non vides
   totalValues: number;
   emptyCount: number;
-  
+
   // Ambiguïté
   isAmbiguous: boolean;
   ambiguityReason?: string;
+
+  // NOUVEAU: Hint Excel (absent pour CSV)
+  excelHint?: ExcelHint;
 }
 
 export type DetectedType = 

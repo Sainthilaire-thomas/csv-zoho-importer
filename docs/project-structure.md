@@ -1,6 +1,6 @@
 ﻿# Structure du projet - csv-zoho-importer
 
-*Genere le 2026-01-23 16:45:30*
+*Genere le 2026-01-24 09:06:23*
 ```
 csv-zoho-importer/
 |-- .vscode/
@@ -158,7 +158,12 @@ csv-zoho-importer/
 |   |   |   |-- mission-013-historique-rollback-v3.md
 |   |   |   |-- mission-013-historique-rollback-v4.md
 |   |   |   |-- mission-013-historique-rollback-v5.md
+|   |   |   |-- mission-013-historique-rollback-v6.md
 |   |   |   |-- mission-014-refactoring-import-wizard.md
+|   |   |   |-- mission-015-COMPLETE.md
+|   |   |   |-- mission-015-ux-historique.md
+|   |   |   |-- mission-016-wizard-persistence.md
+|   |   |   |-- mission-017-excel-metadata.md
 |   |   |   +-- TEMPLATE-MISSION.md
 |   |   |-- base-context.md
 |   |   |-- README.md

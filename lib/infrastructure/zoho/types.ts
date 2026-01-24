@@ -440,7 +440,14 @@ export interface ResolvableIssue {
   message: string;
   sampleValues: string[];
   resolved: boolean;
-  resolution?: IssueResolution;  // ← Changer le type ici
+  resolution?: IssueResolution;
+  
+  // Hint Excel pour guider la résolution (absent pour CSV)
+  excelHint?: {
+    suggestedFormat: string;
+    rawExcelFormat: string;
+    confidence: 'high' | 'medium' | 'low';
+  };
 }
 
 /**

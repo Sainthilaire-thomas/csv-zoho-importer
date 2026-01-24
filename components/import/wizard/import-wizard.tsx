@@ -353,11 +353,12 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
           headers.map(h => String((row as Record<string, unknown>)[h] ?? ''))
         );
 
-        schemaResult = validateSchema({
+       schemaResult = validateSchema({
           fileHeaders: headers,
           sampleData,
           zohoSchema: schema,
           profile: wizardState.profile.selectedProfile || undefined,
+          detectedColumns: wizardState.profile.detectedColumns,  // Pour les hints Excel
         });
 
         wizardState.schema.setSchemaValidation(schemaResult);
@@ -435,23 +436,26 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
           />
         );
 
-      case 'profiling':
+     case 'profiling':
         if (!wizardState.schema.parsedData && state.config.file) {
           parseFile(state.config.file).then(result => {
             const transformed = applyAllTransformations(result.data as Record<string, unknown>[]);
             wizardState.schema.setParsedData(transformed);
+            // Stocker les métadonnées Excel si disponibles
+            if (result.columnMetadata) {
+              wizardState.schema.setColumnMetadata(result.columnMetadata);
+            }
           });
           return <div className="text-center p-8">Analyse du fichier en cours...</div>;
         }
-
         if (!wizardState.schema.parsedData) {
           return <div className="text-center p-8">Aucune donnée à analyser</div>;
         }
-
         return (
           <StepProfile
             fileData={wizardState.schema.parsedData as Record<string, string>[]}
             fileName={state.config.file?.name || ''}
+            columnMetadata={wizardState.schema.columnMetadata}
             onProfileSelected={profileActions.handleProfileSelected}
             onCreateNewProfile={profileActions.handleCreateNewProfile}
             onSkipProfile={profileActions.handleSkipProfile}

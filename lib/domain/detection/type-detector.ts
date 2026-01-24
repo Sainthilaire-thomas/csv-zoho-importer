@@ -1,7 +1,8 @@
 // lib/domain/detection/type-detector.ts
 // Service de détection automatique des types de colonnes d'un fichier
+// Supporte CSV (patterns seuls) et Excel (patterns + métadonnées)
 
-import { DetectedColumn, DetectedType } from '@/types/profiles';
+import { DetectedColumn, DetectedType, ExcelColumnMeta, ExcelHint } from '@/types/profiles';
 
 // =============================================================================
 // CONFIGURATION
@@ -30,11 +31,11 @@ const PATTERNS = {
   DATE_US: /^\d{2}\/\d{2}\/\d{4}$/,                   // 03/05/2025 (même pattern que FR)
   DATE_SHORT: /^\d{2}\/\d{2}\/\d{2}$/,                // 05/03/25
   DATE_LOOSE: /^\d{1,2}\/\d{1,2}\/\d{2,4}$/,         // 5/3/2025 ou 5/3/25
-  
+
   // Durées
   DURATION_HMS: /^\d{1,2}:\d{2}:\d{2}$/,              // 23:54:00 ou 9:30:00
   DURATION_HM: /^\d{1,2}:\d{2}$/,                     // 23:54 ou 9:30
-  
+
   // Nombres
   NUMBER_INT: /^-?\d+$/,                              // 1234 ou -1234
   NUMBER_FR: /^-?\d{1,3}(?:\s\d{3})*(?:,\d+)?$/,     // 1 234,56 (espace milliers, virgule décimale)
@@ -42,15 +43,15 @@ const PATTERNS = {
   NUMBER_US: /^-?\d{1,3}(?:,\d{3})*(?:\.\d+)?$/,     // 1,234.56 (virgule milliers, point décimal)
   NUMBER_US_SIMPLE: /^-?\d+\.\d+$/,                   // 1234.56 (point décimal)
   NUMBER_SCIENTIFIC: /^-?\d+(?:\.\d+)?[eE][+-]?\d+$/, // 1E6, 1.5E-3
-  
+
   // Booléens
   BOOLEAN_FR: /^(oui|non|vrai|faux)$/i,
   BOOLEAN_EN: /^(yes|no|true|false)$/i,
   BOOLEAN_NUM: /^[01]$/,
-  
+
   // Email
   EMAIL: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
-  
+
   // URL
   URL: /^https?:\/\/.+/i,
 };
@@ -62,6 +63,15 @@ const EMPTY_VALUES = new Set([
 ]);
 
 // =============================================================================
+// OPTIONS DE DÉTECTION
+// =============================================================================
+
+export interface DetectionOptions {
+  // Métadonnées Excel par colonne (absent pour CSV)
+  excelMetadata?: Record<string, ExcelColumnMeta>;
+}
+
+// =============================================================================
 // TYPE DETECTOR CLASS
 // =============================================================================
 
@@ -69,21 +79,62 @@ export class TypeDetector {
   /**
    * Analyse toutes les colonnes d'un fichier
    * @param data Tableau de lignes (chaque ligne est un objet clé-valeur)
+   *             Accepte unknown pour supporter les types natifs Excel (number, boolean, Date)
+   * @param options Options de détection (métadonnées Excel si disponibles)
    * @returns Tableau de colonnes détectées
    */
-  detectColumns(data: Record<string, string>[]): DetectedColumn[] {
+  detectColumns(
+    data: Record<string, unknown>[],
+    options?: DetectionOptions
+  ): DetectedColumn[] {
     if (!data || data.length === 0) {
       return [];
     }
 
     // Récupérer les noms de colonnes depuis la première ligne
     const columnNames = Object.keys(data[0]);
-    
+
     return columnNames.map((name, index) => {
-      // Extraire toutes les valeurs de cette colonne
-      const values = data.map(row => row[name] || '');
-      return this.analyzeColumn(name, index, values);
+      // Extraire toutes les valeurs de cette colonne et les convertir en string
+      const values = data.map(row => this.toStringValue(row[name]));
+      
+      // Récupérer les métadonnées Excel pour cette colonne (si disponibles)
+      const excelMeta = options?.excelMetadata?.[name];
+      
+      return this.analyzeColumn(name, index, values, excelMeta);
     });
+  }
+
+  /**
+   * Convertit une valeur de type unknown en string
+   * Gère les types natifs retournés par xlsx (number, boolean, Date, null, undefined)
+   */
+  private toStringValue(value: unknown): string {
+    if (value === null || value === undefined) {
+      return '';
+    }
+    if (typeof value === 'string') {
+      return value;
+    }
+    if (typeof value === 'number') {
+      // Éviter la notation scientifique pour les grands nombres
+      if (Math.abs(value) >= 1e15 || (Math.abs(value) < 1e-6 && value !== 0)) {
+        return value.toLocaleString('en-US', { useGrouping: false, maximumFractionDigits: 20 });
+      }
+      return String(value);
+    }
+    if (typeof value === 'boolean') {
+      return value ? 'true' : 'false';
+    }
+    if (value instanceof Date) {
+      // Convertir Date en format ISO pour analyse ultérieure
+      if (isNaN(value.getTime())) {
+        return '';
+      }
+      return value.toISOString().split('T')[0]; // YYYY-MM-DD
+    }
+    // Fallback pour tout autre type
+    return String(value);
   }
 
   /**
@@ -92,12 +143,13 @@ export class TypeDetector {
   private analyzeColumn(
     name: string,
     index: number,
-    values: string[]
+    values: string[],
+    excelMeta?: ExcelColumnMeta
   ): DetectedColumn {
     // Filtrer les valeurs non vides pour l'analyse
     const nonEmptyValues = values.filter(v => !this.isEmpty(v));
     const emptyCount = values.length - nonEmptyValues.length;
-    
+
     // Si la colonne est majoritairement vide
     const emptyPercentage = (emptyCount / values.length) * 100;
     if (emptyPercentage >= CONFIG.EMPTY_THRESHOLD) {
@@ -115,12 +167,15 @@ export class TypeDetector {
 
     // Prendre un échantillon pour l'analyse
     const sampleValues = this.getSampleForAnalysis(nonEmptyValues);
-    
-    // Détecter le type
+
+    // Détecter le type par patterns
     const detection = this.detectType(sampleValues);
-    
+
     // Vérifier les ambiguïtés
     const ambiguity = this.checkAmbiguity(detection, sampleValues);
+
+    // Construire le hint Excel si disponible et pertinent
+    const excelHint = this.buildExcelHint(detection, ambiguity, excelMeta);
 
     return {
       name,
@@ -133,7 +188,60 @@ export class TypeDetector {
       emptyCount,
       isAmbiguous: ambiguity.isAmbiguous,
       ambiguityReason: ambiguity.reason,
+      excelHint,
     };
+  }
+
+  /**
+   * Construit un hint Excel si les métadonnées sont disponibles et utiles
+   */
+  private buildExcelHint(
+    detection: { type: DetectedType; format?: string },
+    ambiguity: { isAmbiguous: boolean; reason?: string },
+    excelMeta?: ExcelColumnMeta
+  ): ExcelHint | undefined {
+    // Pas de métadonnées = pas de hint
+    if (!excelMeta) {
+      return undefined;
+    }
+
+    // Pas d'ambiguïté = pas besoin de hint
+    if (!ambiguity.isAmbiguous) {
+      return undefined;
+    }
+
+    // Métadonnées non fiables = pas de hint
+    if (excelMeta.confidence === 'low') {
+      return undefined;
+    }
+
+    // Format normalisé non disponible = pas de hint
+    if (!excelMeta.normalizedFormat || !excelMeta.rawExcelFormat) {
+      return undefined;
+    }
+
+    // Pour les dates ambiguës, le hint Excel est très utile
+    if (detection.type === 'date' && excelMeta.normalizedFormat) {
+      return {
+        suggestedFormat: excelMeta.normalizedFormat,
+        rawExcelFormat: excelMeta.rawExcelFormat,
+        confidence: excelMeta.confidence,
+      };
+    }
+
+    // Pour les nombres avec notation scientifique
+    if (detection.type === 'number' && detection.format === 'scientific') {
+      // Excel peut indiquer si c'est vraiment un nombre ou du texte
+      if (excelMeta.dominantCellType === 'string') {
+        return {
+          suggestedFormat: 'text',
+          rawExcelFormat: excelMeta.rawExcelFormat,
+          confidence: excelMeta.confidence,
+        };
+      }
+    }
+
+    return undefined;
   }
 
   /**
@@ -201,7 +309,7 @@ export class TypeDetector {
     for (const { pattern, format } of formats) {
       const matches = values.filter(v => pattern.test(v.trim())).length;
       const confidence = (matches / values.length) * 100;
-      
+
       if (confidence >= CONFIG.MIN_CONFIDENCE) {
         return { confidence: Math.round(confidence), format };
       }
@@ -222,7 +330,7 @@ export class TypeDetector {
     for (const { pattern, format } of formats) {
       const matches = values.filter(v => pattern.test(v.trim())).length;
       const confidence = (matches / values.length) * 100;
-      
+
       if (confidence >= CONFIG.MIN_CONFIDENCE) {
         // Vérifier que ce sont des heures valides (0-23:0-59)
         const validTimes = values.filter(v => {
@@ -232,7 +340,7 @@ export class TypeDetector {
           const minutes = parseInt(match[2]);
           return hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59;
         }).length;
-        
+
         const validConfidence = (validTimes / values.length) * 100;
         if (validConfidence >= CONFIG.MIN_CONFIDENCE) {
           return { confidence: Math.round(validConfidence), format };
@@ -259,7 +367,7 @@ export class TypeDetector {
     for (const { pattern, format } of formats) {
       const matches = values.filter(v => pattern.test(v.trim())).length;
       const confidence = (matches / values.length) * 100;
-      
+
       if (confidence >= CONFIG.MIN_CONFIDENCE) {
         return { confidence: Math.round(confidence), format };
       }
@@ -281,7 +389,7 @@ export class TypeDetector {
     for (const { pattern, format } of patterns) {
       const matches = values.filter(v => pattern.test(v.trim())).length;
       const confidence = (matches / values.length) * 100;
-      
+
       if (confidence >= CONFIG.MIN_CONFIDENCE) {
         return { confidence: Math.round(confidence), format };
       }
@@ -301,18 +409,19 @@ export class TypeDetector {
     detection: { type: DetectedType; format?: string },
     values: string[]
   ): { isAmbiguous: boolean; reason?: string } {
-    
+
     // Ambiguïté date : DD/MM vs MM/DD
     if (detection.type === 'date' && detection.format?.includes('/')) {
       const ambiguousDates = values.filter(v => {
-        const match = v.match(/^(\d{1,2})\/(\d{1,2})\/\d{2,4}$/);
+        // Pattern qui capture la partie date, avec ou sans heure après
+        const match = v.match(/^(\d{1,2})\/(\d{1,2})\/\d{2,4}/);
         if (!match) return false;
         const first = parseInt(match[1]);
         const second = parseInt(match[2]);
         // Ambigu si les deux valeurs pourraient être jour OU mois (≤ 12)
         return first <= 12 && second <= 12;
       });
-      
+
       if (ambiguousDates.length > values.length * 0.5) {
         return {
           isAmbiguous: true,
@@ -339,9 +448,11 @@ export class TypeDetector {
   /**
    * Vérifie si une valeur est considérée comme vide
    */
-  private isEmpty(value: string): boolean {
-    if (!value) return true;
-    const normalized = value.trim().toLowerCase();
+  private isEmpty(value: unknown): boolean {
+    if (value === null || value === undefined) return true;
+    const strValue = String(value);
+    if (strValue === '') return true;
+    const normalized = strValue.trim().toLowerCase();
     return EMPTY_VALUES.has(normalized);
   }
 
@@ -352,7 +463,7 @@ export class TypeDetector {
     if (values.length <= CONFIG.SAMPLE_SIZE) {
       return values;
     }
-    
+
     // Prendre des valeurs réparties uniformément
     const step = Math.floor(values.length / CONFIG.SAMPLE_SIZE);
     const sample: string[] = [];
@@ -385,8 +496,11 @@ export const typeDetector = new TypeDetector();
 /**
  * Détecte les types de colonnes d'un fichier parsé
  */
-export function detectColumnTypes(data: Record<string, string>[]): DetectedColumn[] {
-  return typeDetector.detectColumns(data);
+export function detectColumnTypes(
+  data: Record<string, unknown>[],
+  options?: DetectionOptions
+): DetectedColumn[] {
+  return typeDetector.detectColumns(data, options);
 }
 
 /**
@@ -394,7 +508,8 @@ export function detectColumnTypes(data: Record<string, string>[]): DetectedColum
  */
 export function analyzeColumnValues(
   name: string,
-  values: string[]
+  values: unknown[]
 ): DetectedColumn {
-  return typeDetector['analyzeColumn'](name, 0, values);
+  const stringValues = values.map(v => typeDetector['toStringValue'](v));
+  return typeDetector['analyzeColumn'](name, 0, stringValues, undefined);
 }
