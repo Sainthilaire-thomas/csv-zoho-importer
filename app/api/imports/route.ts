@@ -1,9 +1,9 @@
 // ============================================
 // @file app/api/imports/route.ts
 // API CRUD pour l'historique des imports
-// GET: Liste des imports avec pagination
+// GET: Liste des imports avec pagination et filtrage
 // POST: Créer un nouveau log d'import
-// Mission 013
+// Mission 013 + Mission 015 (UX améliorée)
 // ============================================
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -13,17 +13,21 @@ import type { CreateImportLogData, ImportListResponse } from '@/types/imports';
 /**
  * GET /api/imports
  * Liste des imports avec pagination et filtres
- * 
+ *
  * Query params:
  * - limit: number (default 20, max 100)
  * - offset: number (default 0)
  * - viewId: string (optionnel, filtre par table)
  * - status: string (optionnel, filtre par statut)
+ * - includeRolledBack: boolean (default true) - inclure les imports annulés
+ * 
+ * Note Mission 015: Par défaut, seuls les imports consolidés sont affichés
+ * (chunks_count > 1). Les chunks individuels et tests de 5 lignes sont exclus.
  */
 export async function GET(request: NextRequest) {
   try {
     const supabase = await createClient();
-    
+
     // Vérifier l'authentification
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
@@ -36,15 +40,31 @@ export async function GET(request: NextRequest) {
     const offset = parseInt(searchParams.get('offset') || '0');
     const viewId = searchParams.get('viewId');
     const status = searchParams.get('status');
+    const includeRolledBack = searchParams.get('includeRolledBack') !== 'false'; // true par défaut
 
-    // Construire la requête
+    // Construire la requête de base
     let query = supabase
       .schema('csv_importer')
       .from('import_logs')
       .select('*', { count: 'exact' })
       .eq('user_id', user.id)
-      .order('created_at', { ascending: false })
-      .range(offset, offset + limit - 1);
+      .order('created_at', { ascending: false });
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Mission 015 : Afficher UNIQUEMENT les imports consolidés
+    // ─────────────────────────────────────────────────────────────────────────
+    // Un import consolidé a chunks_count > 1 (plusieurs chunks = import complet)
+    // Les chunks individuels (chunks_count = 1) sont des logs intermédiaires
+    // Les tests de 5 lignes sont aussi chunks_count = 1
+    // 
+    // RÈGLE : chunks_count > 1 = import consolidé à afficher
+    // ─────────────────────────────────────────────────────────────────────────
+    query = query.gt('chunks_count', 1);
+
+    // Filtrer les imports annulés si demandé
+    if (!includeRolledBack) {
+      query = query.eq('rolled_back', false);
+    }
 
     // Filtres optionnels
     if (viewId) {
@@ -53,6 +73,9 @@ export async function GET(request: NextRequest) {
     if (status) {
       query = query.eq('status', status);
     }
+
+    // Pagination
+    query = query.range(offset, offset + limit - 1);
 
     const { data: imports, error, count } = await query;
 
@@ -85,7 +108,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient();
-    
+
     // Vérifier l'authentification
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {

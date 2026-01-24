@@ -1,30 +1,31 @@
 // ============================================
 // @file components/history/import-card.tsx
 // Carte affichant un import dans l'historique
-// Mission 013
+// Mission 013 + Mission 015 (UX améliorée)
 // ============================================
 
 'use client';
 
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { 
-  FileSpreadsheet, 
-  Clock, 
-  Layers, 
-  Undo2, 
-  Info, 
-  AlertTriangle, 
+import {
+  FileSpreadsheet,
+  Clock,
+  Layers,
+  Undo2,
+  Info,
+  AlertTriangle,
   AlertCircle,
   CheckCircle,
   XCircle,
-  RotateCcw
+  RotateCcw,
+  Ban
 } from 'lucide-react';
 import { RollbackDialog } from './rollback-dialog';
-import { 
-  getRollbackInfo, 
+import {
+  getRollbackInfo,
   IMPORT_MODE_LABELS,
-  type RollbackInfo 
+  type RollbackInfo
 } from '@/lib/domain/history/rollback-rules';
 import type { ImportLog, ImportMode } from '@/types/imports';
 
@@ -36,12 +37,12 @@ interface ImportCardProps {
 
 export function ImportCard({ importLog, onRollbackSuccess, isLatestForTable }: ImportCardProps) {
   const [showRollbackDialog, setShowRollbackDialog] = useState(false);
-  
+
   const rollbackInfo = getRollbackInfo(importLog.import_mode as ImportMode);
-  const canShowRollbackButton = rollbackInfo.canRollback && 
-    !importLog.rolled_back && 
+  const canShowRollbackButton = rollbackInfo.canRollback &&
+    !importLog.rolled_back &&
     isLatestForTable &&
-    importLog.row_id_before !== null && 
+    importLog.row_id_before !== null &&
     importLog.row_id_after !== null;
 
   // Formatage date
@@ -96,19 +97,38 @@ export function ImportCard({ importLog, onRollbackSuccess, isLatestForTable }: I
     }
   };
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // Mission 015 : Style différencié pour les imports annulés
+  // ─────────────────────────────────────────────────────────────────────────
+  const isRolledBack = importLog.rolled_back;
+
+  // Classes de base pour la carte
+  const cardClasses = isRolledBack
+    ? 'bg-gray-50 dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 p-4 opacity-60'
+    : 'bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4';
+
   return (
     <>
-      <div className={`bg-white dark:bg-gray-800 rounded-lg border p-4 ${
-        importLog.rolled_back 
-          ? 'border-gray-300 dark:border-gray-600 opacity-70' 
-          : 'border-gray-200 dark:border-gray-700'
-      }`}>
+      <div className={cardClasses}>
+        {/* Badge "Annulé" pour les imports rollbackés */}
+        {isRolledBack && (
+          <div className="flex items-center gap-2 mb-3 pb-2 border-b border-gray-200 dark:border-gray-700">
+            <Ban className="h-4 w-4 text-gray-400" />
+            <span className="text-sm font-medium text-gray-500 dark:text-gray-400">
+              Import annulé
+            </span>
+            <span className="text-xs text-gray-400 dark:text-gray-500">
+              le {formatDate(importLog.rolled_back_at!)}
+            </span>
+          </div>
+        )}
+
         {/* Header */}
         <div className="flex items-start justify-between mb-3">
           <div className="flex items-center gap-3">
-            <FileSpreadsheet className="h-5 w-5 text-gray-500" />
+            <FileSpreadsheet className={`h-5 w-5 ${isRolledBack ? 'text-gray-400' : 'text-gray-500'}`} />
             <div>
-              <h3 className="font-medium text-gray-900 dark:text-white">
+              <h3 className={`font-medium ${isRolledBack ? 'text-gray-500 dark:text-gray-400 line-through' : 'text-gray-900 dark:text-white'}`}>
                 {importLog.file_name}
               </h3>
               <p className="text-sm text-gray-500 dark:text-gray-400">
@@ -123,15 +143,15 @@ export function ImportCard({ importLog, onRollbackSuccess, isLatestForTable }: I
 
         {/* Stats */}
         <div className="flex flex-wrap gap-4 mb-3 text-sm">
-          <div className="flex items-center gap-1 text-gray-600 dark:text-gray-300">
+          <div className={`flex items-center gap-1 ${isRolledBack ? 'text-gray-400' : 'text-gray-600 dark:text-gray-300'}`}>
             <Layers className="h-4 w-4" />
             <span>{formatNumber(importLog.rows_imported)} lignes</span>
           </div>
-          <div className="flex items-center gap-1 text-gray-600 dark:text-gray-300">
+          <div className={`flex items-center gap-1 ${isRolledBack ? 'text-gray-400' : 'text-gray-600 dark:text-gray-300'}`}>
             <Clock className="h-4 w-4" />
             <span>{formatDuration(importLog.duration_ms)}</span>
           </div>
-          <div className="px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300">
+          <div className={`px-2 py-0.5 rounded ${isRolledBack ? 'bg-gray-200 dark:bg-gray-700 text-gray-500' : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300'}`}>
             {IMPORT_MODE_LABELS[importLog.import_mode as ImportMode] || importLog.import_mode}
           </div>
         </div>
@@ -139,11 +159,11 @@ export function ImportCard({ importLog, onRollbackSuccess, isLatestForTable }: I
         {/* Statut */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            {importLog.rolled_back ? (
+            {isRolledBack ? (
               <>
-                <RotateCcw className="h-4 w-4 text-gray-500" />
-                <span className="text-sm text-gray-500">
-                  Annulé le {formatDate(importLog.rolled_back_at!)}
+                <RotateCcw className="h-4 w-4 text-gray-400" />
+                <span className="text-sm text-gray-400">
+                  Données supprimées de Zoho
                 </span>
               </>
             ) : importLog.status === 'success' ? (
@@ -165,7 +185,7 @@ export function ImportCard({ importLog, onRollbackSuccess, isLatestForTable }: I
           </div>
 
           {/* Bouton rollback ou message */}
-          {!importLog.rolled_back && (
+          {!isRolledBack && (
             canShowRollbackButton ? (
               <Button
                 variant="outline"
@@ -181,7 +201,7 @@ export function ImportCard({ importLog, onRollbackSuccess, isLatestForTable }: I
         </div>
 
         {/* Message de correction si pas rollbackable */}
-        {!importLog.rolled_back && !rollbackInfo.canRollback && rollbackInfo.message && (
+        {!isRolledBack && !rollbackInfo.canRollback && rollbackInfo.message && (
           <div className={`mt-3 p-3 rounded-md border ${getSeverityBgClass(rollbackInfo.severity)}`}>
             <div className="flex items-start gap-2">
               {getSeverityIcon(rollbackInfo.severity)}
@@ -193,7 +213,7 @@ export function ImportCard({ importLog, onRollbackSuccess, isLatestForTable }: I
         )}
 
         {/* Message si pas le dernier import de la table */}
-        {!importLog.rolled_back && rollbackInfo.canRollback && !isLatestForTable && (
+        {!isRolledBack && rollbackInfo.canRollback && !isLatestForTable && (
           <div className="mt-3 p-3 rounded-md border bg-amber-50 dark:bg-amber-950 border-amber-200 dark:border-amber-800">
             <div className="flex items-start gap-2">
               <AlertTriangle className="h-4 w-4 text-amber-500" />
