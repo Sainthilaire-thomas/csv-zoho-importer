@@ -157,13 +157,90 @@ export function applyTransformation(value: string, transformType: string | undef
   
   switch (transformType) {
     case 'date_format':
-      // Simuler conversion DD/MM/YYYY → YYYY-MM-DD
-      const dateMatch = value.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-      if (dateMatch) {
-        return `${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}`;
-      }
-      return value;
+      // 1. Conversion période française (juin-25, janv-24, etc.) → YYYY-MM-01 00:00:00
+      // Normaliser les caractères accentués et corrompus
+      const normalizedValue = value
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')  // Supprime les accents
+        .replace(/\uFFFD/g, '')           // Supprime les caractères de remplacement Unicode
+        .replace(/[^\w\d-]/g, '');        // Garde uniquement lettres, chiffres, tirets
       
+      const monthNames: Record<string, string> = {
+        // Janvier
+        'janvier': '01', 'janv': '01', 'jan': '01',
+        // Février (fév, févr, février → fev, fevr, fevrier + variantes corrompues)
+        'fevrier': '02', 'fevr': '02', 'fev': '02', 'feb': '02', 'fvrier': '02', 'fvr': '02',
+        // Mars
+        'mars': '03', 'mar': '03',
+        // Avril
+        'avril': '04', 'avr': '04', 'apr': '04',
+        // Mai
+        'mai': '05', 'may': '05',
+        // Juin
+        'juin': '06', 'jun': '06',
+        // Juillet
+        'juillet': '07', 'juil': '07', 'jul': '07',
+        // Août (août → aout + variantes corrompues: ao�t, aût, etc.)
+        'aout': '08', 'aug': '08', 'ao': '08', 'aot': '08', 'aut': '08', 'out': '08',
+        // Septembre
+        'septembre': '09', 'sept': '09', 'sep': '09',
+        // Octobre
+        'octobre': '10', 'oct': '10',
+        // Novembre
+        'novembre': '11', 'nov': '11',
+        // Décembre (déc, décembre → dec, decembre + variantes corrompues)
+        'decembre': '12', 'dec': '12', 'dcembre': '12', 'dc': '12'
+      };
+      
+      // Pattern: mois-année (ex: juin-25, janv-24, septembre-2025)
+      const periodMatch = normalizedValue.match(/^([a-z]+)-(\d{2,4})$/);
+      if (periodMatch) {
+        const monthStr = periodMatch[1];
+        let yearStr = periodMatch[2];
+        const monthNum = monthNames[monthStr];
+        
+        if (monthNum) {
+          // Convertir année 2 chiffres en 4 chiffres (25 → 2025)
+          if (yearStr.length === 2) {
+            const yearNum = parseInt(yearStr, 10);
+            yearStr = yearNum >= 50 ? `19${yearStr}` : `20${yearStr}`;
+          }
+          return `${yearStr}-${monthNum}-01 00:00:00`;
+        }
+      }
+
+      // 2. Conversion DD/MM/YYYY ou DD/MM/YYYY HH:mm:ss → YYYY-MM-DD HH:mm:ss
+      const dateWithTimeMatch = value.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+      if (dateWithTimeMatch) {
+        const day = dateWithTimeMatch[1].padStart(2, '0');
+        const month = dateWithTimeMatch[2].padStart(2, '0');
+        const year = dateWithTimeMatch[3];
+        const hours = dateWithTimeMatch[4];
+        const minutes = dateWithTimeMatch[5];
+        const seconds = dateWithTimeMatch[6];
+        
+        // Si heure présente, conserver au format YYYY-MM-DD HH:mm:ss
+        if (hours && minutes) {
+          const hh = hours.padStart(2, '0');
+          const mm = minutes.padStart(2, '0');
+          const ss = seconds ? seconds.padStart(2, '0') : '00';
+          return `${year}-${month}-${day} ${hh}:${mm}:${ss}`;
+        }
+        // Sinon la date avec heure à 00:00:00 pour uniformiser
+        return `${year}-${month}-${day} 00:00:00`;
+      }
+      
+      // 3. Pattern ISO déjà correct (YYYY-MM-DD) - ajouter l'heure si manquante
+      const isoMatch = value.match(/^(\d{4}-\d{2}-\d{2})(?:\s+(\d{2}:\d{2}:\d{2}))?$/);
+      if (isoMatch) {
+        const datePart = isoMatch[1];
+        const timePart = isoMatch[2] || '00:00:00';
+        return `${datePart} ${timePart}`;
+      }
+      
+      return value;
+
     case 'number_format':
       // Simuler conversion 1 234,56 → 1234.56
       return value.replace(/\s/g, '').replace(',', '.');

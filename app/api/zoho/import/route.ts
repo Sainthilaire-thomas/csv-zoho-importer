@@ -102,7 +102,7 @@ const result = await client.importData({
   importType: zohoImportType,
   data: csvData,
   autoIdentify: !columnTypes,  // ← MODIFIER : false si on a les types
-  dateFormat: 'yyyy-MM-dd',
+  dateFormat: 'yyyy-MM-dd HH:mm:ss',
   matchingColumns,
   columnTypes,  // ← AJOUTER
 });

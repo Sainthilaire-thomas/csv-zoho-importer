@@ -450,7 +450,7 @@ export class ZohoAnalyticsClient {
     importType,
     data,
     autoIdentify = true,
-    dateFormat = 'dd/MM/yyyy',
+    dateFormat = 'yyyy-MM-dd HH:mm:ss',
     matchingColumns,
     columnTypes,
   } = params;

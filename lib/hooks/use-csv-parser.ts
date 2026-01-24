@@ -4,7 +4,7 @@
 import { useCallback } from 'react';
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
-import { ExcelColumnMeta } from '@/types/profiles';
+import { ExcelColumnMeta, RawCellData, RawCellDataMap } from '@/types/profiles';
 
 // =============================================================================
 // TYPES
@@ -16,9 +16,13 @@ export interface ParseResult {
   totalRows: number;
   fileName: string;
   fileType: 'csv' | 'xlsx' | 'xls';
-  
-  // NOUVEAU: Métadonnées Excel par colonne (absent pour CSV)
+
+  // Métadonnées Excel par colonne (absent pour CSV)
   columnMetadata?: Record<string, ExcelColumnMeta>;
+  
+  // NOUVEAU: Données brutes par cellule pour UI accordéon (absent pour CSV)
+  // Structure: rawCellData[rowIndex][columnName] = { v, z, w, t, isLocaleAwareFormat }
+  rawCellData?: RawCellDataMap;
 }
 
 export interface ParseError {
@@ -34,7 +38,7 @@ export function useCsvParser() {
   const parseFile = useCallback(async (file: File): Promise<ParseResult> => {
     const fileName = file.name;
     const extension = fileName.split('.').pop()?.toLowerCase();
-    
+
     console.log('Parsing fichier:', fileName, 'extension:', extension);
 
     if (extension === 'csv') {
@@ -62,7 +66,7 @@ async function parseCsv(file: File): Promise<ParseResult> {
       transform: (value) => value.trim(),
       complete: (results) => {
         console.log('CSV parse complete, rows:', results.data.length);
-        
+
         if (results.errors.length > 0) {
           const criticalErrors = results.errors.filter(
             (e) => e.type === 'Quotes' || e.type === 'FieldMismatch'
@@ -74,14 +78,14 @@ async function parseCsv(file: File): Promise<ParseResult> {
         }
 
         const headers = results.meta.fields || [];
-        
+
         resolve({
           data: results.data,
           headers,
           totalRows: results.data.length,
           fileName: file.name,
           fileType: 'csv',
-          // Pas de columnMetadata pour CSV
+          // Pas de columnMetadata ni rawCellData pour CSV
         });
       },
       error: (error) => {
@@ -92,7 +96,7 @@ async function parseCsv(file: File): Promise<ParseResult> {
 }
 
 // =============================================================================
-// PARSING EXCEL AVEC EXTRACTION DES MÉTADONNÉES
+// PARSING EXCEL AVEC EXTRACTION DES MÉTADONNÉES ET DONNÉES BRUTES
 // =============================================================================
 
 async function parseExcel(file: File): Promise<ParseResult> {
@@ -120,8 +124,8 @@ async function parseExcel(file: File): Promise<ParseResult> {
         const columnMetadata = extractColumnMetadata(worksheet);
         console.log('Métadonnées Excel extraites:', Object.keys(columnMetadata).length, 'colonnes');
 
-        // Extraire les données avec les valeurs FORMATÉES (comme l'utilisateur les voit)
-        const jsonData = extractFormattedData(worksheet);
+        // Extraire les données avec les valeurs FORMATÉES + données brutes par cellule
+        const { jsonData, rawCellData } = extractFormattedDataWithRaw(worksheet);
         console.log('Excel parse complete, rows:', jsonData.length);
 
         const headers = jsonData.length > 0 ? Object.keys(jsonData[0]) : [];
@@ -133,6 +137,7 @@ async function parseExcel(file: File): Promise<ParseResult> {
           fileName: file.name,
           fileType: file.name.endsWith('.xlsx') ? 'xlsx' : 'xls',
           columnMetadata,
+          rawCellData,  // NOUVEAU
         });
       } catch (error) {
         console.error('Erreur parsing Excel:', error);
@@ -149,16 +154,19 @@ async function parseExcel(file: File): Promise<ParseResult> {
 }
 
 /**
- * Extrait les données en utilisant la bonne interprétation selon le format Excel
+ * Extrait les données formatées ET les données brutes par cellule
  * 
- * Logique :
- * - Si z contient un format date locale-aware (m/d/yy, etc.) → c'est une date, on convertit v en DD/MM/YYYY
- * - Si z est "General" → c'est un nombre normal (montant, ID), on garde v
- * - Sinon → on utilise w si disponible, sinon v
+ * Retourne :
+ * - jsonData: les données transformées (comme avant)
+ * - rawCellData: les infos brutes v/z/w/t pour chaque cellule (pour UI accordéon)
  */
-function extractFormattedData(worksheet: XLSX.WorkSheet): Record<string, unknown>[] {
+function extractFormattedDataWithRaw(worksheet: XLSX.WorkSheet): {
+  jsonData: Record<string, unknown>[];
+  rawCellData: RawCellDataMap;
+} {
   const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1');
-  const data: Record<string, unknown>[] = [];
+  const jsonData: Record<string, unknown>[] = [];
+  const rawCellData: RawCellDataMap = {};
 
   // Extraire les headers (première ligne)
   const headers: string[] = [];
@@ -169,8 +177,10 @@ function extractFormattedData(worksheet: XLSX.WorkSheet): Record<string, unknown
   }
 
   // Extraire les données (lignes suivantes)
+  let dataRowIndex = 0;
   for (let row = range.s.r + 1; row <= range.e.r; row++) {
     const rowData: Record<string, unknown> = {};
+    const rowRawData: Record<string, RawCellData> = {};
     let hasData = false;
 
     for (let col = range.s.c; col <= range.e.c; col++) {
@@ -179,10 +189,22 @@ function extractFormattedData(worksheet: XLSX.WorkSheet): Record<string, unknown
       const header = headers[col - range.s.c];
 
       if (cell) {
-        let value: unknown;
         const format = (cell.z || 'General').toLowerCase();
+        const isLocaleAware = isLocaleAwareDateFormat(format);
+        
+        // Stocker les données brutes pour l'UI accordéon
+        rowRawData[header] = {
+          v: cell.v,
+          z: cell.z,
+          w: cell.w,
+          t: cell.t,
+          isLocaleAwareFormat: isLocaleAware,
+        };
 
-        if (cell.t === 'n' && isLocaleAwareDateFormat(format)) {
+        // Calculer la valeur transformée
+        let value: unknown;
+
+        if (cell.t === 'n' && isLocaleAware) {
           // Format date "locale-aware" (m/d/yy, etc.)
           // xlsx génère w incorrectement, on convertit v nous-mêmes en français DD/MM/YYYY
           value = excelSerialToDateString(cell.v as number, format);
@@ -201,16 +223,19 @@ function extractFormattedData(worksheet: XLSX.WorkSheet): Record<string, unknown
         if (value !== '') hasData = true;
       } else {
         rowData[header] = '';
+        // Cellule vide - pas de données brutes à stocker
       }
     }
 
     // Ne pas ajouter les lignes complètement vides
     if (hasData) {
-      data.push(rowData);
+      jsonData.push(rowData);
+      rawCellData[dataRowIndex] = rowRawData;
+      dataRowIndex++;
     }
   }
 
-  return data;
+  return { jsonData, rawCellData };
 }
 
 /**
@@ -233,14 +258,14 @@ function isLocaleAwareDateFormat(format: string): boolean {
     'dd/mm/yy',
     'dd/mm/yyyy',
   ];
-  
+
   return localeAwareFormats.includes(format);
 }
 
 
 /**
  * Convertit un nombre sériel Excel en string de date format français DD/MM/YYYY
- * 
+ *
  * Pour les formats "locale-aware", on force toujours le format français
  * car l'application est destinée à un contexte français.
  */
@@ -248,21 +273,21 @@ function excelSerialToDateString(serial: number, format: string): string {
   // Séparer la partie entière (jours) et décimale (heure)
   const days = Math.floor(serial);
   const timeFraction = serial - days;
-  
+
   // Conversion Excel → Date JavaScript
   // Excel: jour 1 = 1 janvier 1900
   // Excel a un bug historique : il pense que 1900 était bissextile
   const excelEpoch = new Date(1899, 11, 30); // 30 déc 1899
   const date = new Date(excelEpoch.getTime() + days * 24 * 60 * 60 * 1000);
-  
+
   const day = date.getDate().toString().padStart(2, '0');
   const month = (date.getMonth() + 1).toString().padStart(2, '0');
   const year = date.getFullYear();
-  
+
   // Partie heure si présente dans le format
   let timeStr = '';
   const hasTimeInFormat = /h/i.test(format);
-  
+
   if (timeFraction > 0.0001 && hasTimeInFormat) {
     const totalSeconds = Math.round(timeFraction * 24 * 60 * 60);
     const hours = Math.floor(totalSeconds / 3600).toString().padStart(2, '0');
@@ -270,7 +295,7 @@ function excelSerialToDateString(serial: number, format: string): string {
     const seconds = (totalSeconds % 60).toString().padStart(2, '0');
     timeStr = ` ${hours}:${minutes}:${seconds}`;
   }
-  
+
   // TOUJOURS format français DD/MM/YYYY (contexte application française)
   return `${day}/${month}/${year}${timeStr}`;
 }
@@ -282,11 +307,11 @@ function excelSerialToTimeString(serial: number): string {
   // La partie décimale représente la fraction du jour
   const fraction = serial < 1 ? serial : serial - Math.floor(serial);
   const totalSeconds = Math.round(fraction * 24 * 60 * 60);
-  
+
   const hours = Math.floor(totalSeconds / 3600).toString().padStart(2, '0');
   const minutes = Math.floor((totalSeconds % 3600) / 60).toString().padStart(2, '0');
   const seconds = (totalSeconds % 60).toString().padStart(2, '0');
-  
+
   return `${hours}:${minutes}:${seconds}`;
 }
 
@@ -299,25 +324,25 @@ function excelSerialToTimeString(serial: number): string {
  */
 function extractColumnMetadata(worksheet: XLSX.WorkSheet): Record<string, ExcelColumnMeta> {
   const metadata: Record<string, ExcelColumnMeta> = {};
-  
+
   // Obtenir la plage de cellules
   const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1');
-  
+
   // Pour chaque colonne
   for (let col = range.s.c; col <= range.e.c; col++) {
     // Obtenir le nom de la colonne depuis la première ligne (header)
     const headerCell = worksheet[XLSX.utils.encode_cell({ r: range.s.r, c: col })];
     const columnName = headerCell?.v?.toString() || `Column${col}`;
-    
+
     // Collecter les infos de toutes les cellules de cette colonne (sauf header)
     const cellInfos: Array<{ type: string; format?: string; formatted?: string }> = [];
-    
+
     for (let row = range.s.r + 1; row <= range.e.r; row++) {
       const cellAddress = XLSX.utils.encode_cell({ r: row, c: col });
       const cell = worksheet[cellAddress];
 
-      
-      
+
+
       if (cell) {
         cellInfos.push({
           type: cell.t || 's',           // Type: s=string, n=number, d=date, b=boolean
@@ -326,11 +351,11 @@ function extractColumnMetadata(worksheet: XLSX.WorkSheet): Record<string, ExcelC
         });
       }
     }
-    
+
     // Analyser les informations collectées
     metadata[columnName] = analyzeColumnCells(cellInfos);
   }
-  
+
   return metadata;
 }
 
@@ -347,40 +372,40 @@ function analyzeColumnCells(
       confidence: 'low',
     };
   }
-  
+
   // Compter les types
   const typeCounts: Record<string, number> = {};
   const formatCounts: Record<string, number> = {};
   const formattedSamples: string[] = [];
-  
+
   for (const info of cellInfos) {
     // Compter les types
     const mappedType = mapExcelType(info.type);
     typeCounts[mappedType] = (typeCounts[mappedType] || 0) + 1;
-    
+
     // Compter les formats (si présent)
     if (info.format) {
       formatCounts[info.format] = (formatCounts[info.format] || 0) + 1;
     }
-    
+
     // Collecter des échantillons formatés (max 5, uniques)
     if (info.formatted && formattedSamples.length < 5 && !formattedSamples.includes(info.formatted)) {
       formattedSamples.push(info.formatted);
     }
   }
-  
+
   // Déterminer le type dominant
   const dominantType = Object.entries(typeCounts)
     .sort((a, b) => b[1] - a[1])[0];
-  
+
   const dominantTypePercentage = dominantType ? (dominantType[1] / cellInfos.length) * 100 : 0;
-  
+
   // Déterminer le format dominant
   const dominantFormat = Object.entries(formatCounts)
     .sort((a, b) => b[1] - a[1])[0];
-  
+
   const dominantFormatPercentage = dominantFormat ? (dominantFormat[1] / cellInfos.length) * 100 : 0;
-  
+
   // Calculer la confiance
   let confidence: 'high' | 'medium' | 'low' = 'low';
   if (dominantTypePercentage >= 90 && dominantFormatPercentage >= 80) {
@@ -388,11 +413,11 @@ function analyzeColumnCells(
   } else if (dominantTypePercentage >= 70 || dominantFormatPercentage >= 60) {
     confidence = 'medium';
   }
-  
+
   // Normaliser le format Excel vers notre système
   const rawFormat = dominantFormat?.[0];
   const normalizedFormat = rawFormat ? normalizeExcelFormat(rawFormat) : undefined;
-  
+
   return {
     dominantCellType: (dominantType?.[0] as ExcelColumnMeta['dominantCellType']) || 'string',
     rawExcelFormat: rawFormat,
@@ -420,25 +445,25 @@ function mapExcelType(excelType: string): ExcelColumnMeta['dominantCellType'] {
  */
 function normalizeExcelFormat(excelFormat: string): string | undefined {
   const formatLower = excelFormat.toLowerCase();
-  
+
   // Formats de date
   if (formatLower.includes('dd') && formatLower.includes('mm') && formatLower.includes('yy')) {
     // Déterminer l'ordre jour/mois
     const ddIndex = formatLower.indexOf('dd');
     const mmIndex = formatLower.indexOf('mm');
-    
+
     if (ddIndex < mmIndex) {
       return 'DD/MM/YYYY';  // Format européen
     } else {
       return 'MM/DD/YYYY';  // Format américain
     }
   }
-  
+
   // Format ISO
   if (formatLower.includes('yyyy-mm-dd') || formatLower.includes('yyyy/mm/dd')) {
     return 'YYYY-MM-DD';
   }
-  
+
   // Formats de durée/heure
   if (formatLower.includes('hh') && formatLower.includes('mm') && formatLower.includes('ss')) {
     return 'HH:mm:ss';
@@ -446,7 +471,7 @@ function normalizeExcelFormat(excelFormat: string): string | undefined {
   if (formatLower.includes('hh') && formatLower.includes('mm') && !formatLower.includes('ss')) {
     return 'HH:mm';
   }
-  
+
   // Formats numériques
   if (formatLower.includes('#') || formatLower.includes('0')) {
     // Détecter le séparateur décimal
@@ -461,6 +486,6 @@ function normalizeExcelFormat(excelFormat: string): string | undefined {
       return 'fr';  // Espace comme séparateur de milliers = français
     }
   }
-  
+
   return undefined;
 }

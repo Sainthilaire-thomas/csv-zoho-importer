@@ -426,6 +426,10 @@ export function rowToProfile(row: ImportProfileRow): ImportProfile {
     lastUsedAt: row.last_used_at ? new Date(row.last_used_at) : null,
     useCount: row.use_count,
   };
+
+  
+
+
 }
 
 /**
@@ -448,3 +452,17 @@ export function profileToRow(
     created_by: profile.createdBy,
   };
 }
+
+// =============================================================================
+// DONNÉES BRUTES EXCEL PAR CELLULE (Mission 017 Phase 2)
+// =============================================================================
+
+export interface RawCellData {
+  v: unknown;
+  z?: string;
+  w?: string;
+  t?: string;
+  isLocaleAwareFormat: boolean;
+}
+
+export type RawCellDataMap = Record<number, Record<string, RawCellData>>;

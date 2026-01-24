@@ -1,25 +1,36 @@
 ﻿'use client';
 
 /**
- * StepTransformPreview - Mission 006
+ * StepTransformPreview - Mission 006 + Mission 017 Phase 2
  * Affiche un aperçu détaillé des données AVANT import
- * Montre : Source (fichier) → Transformé (envoyé à Zoho)
+ * 
+ * NOUVEAU (Phase 2): UI Accordéon montrant la chaîne complète de transformation :
+ * - Source Excel (v, z, w)
+ * - Interprétation locale
+ * - Transformation appliquée
+ * - Ce qui sera envoyé à Zoho
+ * - Prévision affichage Zoho
  */
 
 import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Alert } from '@/components/ui/alert';
-import { 
-  ArrowRight, 
-  ChevronDown, 
-  ChevronUp,
+import {
+  ArrowRight,
+  ChevronDown,
+  ChevronRight,
   Info,
   RefreshCw,
   Check,
-  Eye
+  Eye,
+  FileSpreadsheet,
+  Monitor,
+  Repeat,
+  Cloud,
 } from 'lucide-react';
 import type { AutoTransformation, ColumnMapping } from '@/lib/infrastructure/zoho/types';
+import type { RawCellDataMap } from '@/types/profiles';
 
 // =============================================================================
 // TYPES
@@ -31,8 +42,15 @@ interface StepTransformPreviewProps {
   parsedData: Record<string, unknown>[];
   totalRows: number;
   zohoReferenceRow?: Record<string, unknown> | null;
+  // NOUVEAU: Données brutes Excel pour l'accordéon
+  rawCellData?: RawCellDataMap;
+  fileType?: 'csv' | 'xlsx' | 'xls';
   onBack: () => void;
   onConfirm: () => void;
+}
+
+interface AccordionRowState {
+  [key: string]: boolean;  // "rowIndex-columnName" -> expanded
 }
 
 // =============================================================================
@@ -40,35 +58,42 @@ interface StepTransformPreviewProps {
 // =============================================================================
 
 function applyTransformation(value: string, transformType: string | undefined): string {
-  if (!value || value.trim() === '') return '';
-  
+  if (!value || (typeof value === 'string' && value.trim() === '')) return '';
+
+  const strValue = String(value);
+
   switch (transformType) {
     case 'date_format':
       // Simuler conversion DD/MM/YYYY → YYYY-MM-DD
-      const dateMatch = value.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+      // Avec heure: DD/MM/YYYY HH:mm:ss → YYYY-MM-DD HH:mm:ss
+      const dateTimeMatch = strValue.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2}):(\d{2})$/);
+      if (dateTimeMatch) {
+        return `${dateTimeMatch[3]}-${dateTimeMatch[2]}-${dateTimeMatch[1]} ${dateTimeMatch[4]}:${dateTimeMatch[5]}:${dateTimeMatch[6]}`;
+      }
+      const dateMatch = strValue.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
       if (dateMatch) {
         return `${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}`;
       }
-      return value;
-      
+      return strValue;
+
     case 'number_format':
       // Simuler conversion 1 234,56 → 1234.56
-      return value.replace(/\s/g, '').replace(',', '.');
-      
+      return strValue.replace(/\s/g, '').replace(',', '.');
+
     case 'duration_format':
       // Simuler conversion 9:30 → 09:30:00
-      const durationMatch = value.match(/^(\d{1,2}):(\d{2})$/);
+      const durationMatch = strValue.match(/^(\d{1,2}):(\d{2})$/);
       if (durationMatch) {
         const hours = durationMatch[1].padStart(2, '0');
         return `${hours}:${durationMatch[2]}:00`;
       }
-      return value;
-      
+      return strValue;
+
     case 'trim':
-      return value.trim();
-      
+      return strValue.trim();
+
     default:
-      return value;
+      return strValue;
   }
 }
 
@@ -87,12 +112,12 @@ function getTransformLabel(transformType: string | undefined): string | null {
  */
 function predictZohoDisplay(value: string, zohoType: string | null | undefined): string {
   if (!value) return '';
-  
+
   // Pour les dates, Zoho affiche en format "DD Mon, YYYY HH:mm:ss"
   if (zohoType === 'DATE' || zohoType === 'DATE_AS_DATE' || zohoType === 'DATE_TIME') {
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
                     'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    
+
     // Format ISO date seule : 2025-04-04
     const dateOnlyMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
     if (dateOnlyMatch) {
@@ -101,7 +126,7 @@ function predictZohoDisplay(value: string, zohoType: string | null | undefined):
       const year = dateOnlyMatch[1];
       return `${day} ${month}, ${year} 00:00:00`;
     }
-    
+
     // Format ISO datetime : 2025-04-04 23:59:35 ou 2025-04-04T23:59:35
     const dateTimeMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})$/);
     if (dateTimeMatch) {
@@ -112,8 +137,238 @@ function predictZohoDisplay(value: string, zohoType: string | null | undefined):
       return `${day} ${month}, ${year} ${time}`;
     }
   }
-  
+
   return value;
+}
+
+/**
+ * Génère la description de la règle de transformation
+ */
+function getTransformationRule(
+  isLocaleAware: boolean,
+  hasTime: boolean,
+  transformType: string | undefined
+): string {
+  if (isLocaleAware) {
+    if (hasTime) {
+      return 'Format locale-aware (Excel FR) → DD/MM/YYYY HH:mm:ss → ISO';
+    }
+    return 'Format locale-aware (Excel FR) → DD/MM/YYYY → ISO';
+  }
+  
+  switch (transformType) {
+    case 'date_format': return 'DD/MM/YYYY → ISO (YYYY-MM-DD)';
+    case 'number_format': return 'Virgule décimale → Point décimal';
+    case 'duration_format': return 'HH:mm → HH:mm:ss';
+    default: return 'Aucune transformation';
+  }
+}
+
+// =============================================================================
+// COMPOSANT ACCORDÉON DÉTAIL CELLULE
+// =============================================================================
+
+interface CellDetailAccordionProps {
+  columnName: string;
+  rowIndex: number;
+  sourceValue: unknown;
+  transformedValue: string;
+  zohoPreview: string;
+  zohoType: string | null | undefined;
+  zohoReferenceValue?: unknown;
+  rawCell?: {
+    v: unknown;
+    z?: string;
+    w?: string;
+    t?: string;
+    isLocaleAwareFormat: boolean;
+  };
+  isExpanded: boolean;
+  onToggle: () => void;
+}
+
+function CellDetailAccordion({
+  columnName,
+  rowIndex,
+  sourceValue,
+  transformedValue,
+  zohoPreview,
+  zohoType,
+  zohoReferenceValue,
+  rawCell,
+  isExpanded,
+  onToggle,
+}: CellDetailAccordionProps) {
+  const hasTransformation = String(sourceValue) !== transformedValue && sourceValue !== '';
+  const hasRawData = rawCell && rawCell.v !== undefined;
+  const isExcelDate = rawCell?.isLocaleAwareFormat && rawCell?.t === 'n';
+  
+// Ne pas afficher l'accordéon si pas de données intéressantes
+  const displayValue = String(sourceValue ?? '');
+  
+  if (!hasRawData && !hasTransformation) {
+    return (
+      <div className="flex items-center gap-2 text-sm">
+        <span className="font-mono text-gray-600 dark:text-gray-400">
+          {displayValue || <span className="italic text-gray-400">(vide)</span>}
+        </span>
+        {displayValue && (
+          <Check className="h-3 w-3 text-green-500 shrink-0" />
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-1">
+      {/* En-tête cliquable */}
+      <button
+        onClick={onToggle}
+        className="flex items-center gap-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-800 rounded px-1 -mx-1 w-full text-left"
+      >
+        {isExpanded ? (
+          <ChevronDown className="h-3 w-3 text-gray-400 shrink-0" />
+        ) : (
+          <ChevronRight className="h-3 w-3 text-gray-400 shrink-0" />
+        )}
+        
+        {/* Résumé compact */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="font-mono text-gray-600 dark:text-gray-400 text-xs">
+            {String(sourceValue) || <span className="italic">(vide)</span>}
+          </span>
+          
+          {hasTransformation && (
+            <>
+              <ArrowRight className="h-3 w-3 text-blue-500" />
+              <span className="font-mono text-blue-600 dark:text-blue-400 text-xs font-medium">
+                {transformedValue}
+              </span>
+            </>
+          )}
+          
+          {hasRawData && (
+            <span className="text-xs text-purple-500 ml-1">
+              (détails)
+            </span>
+          )}
+        </div>
+      </button>
+
+      {/* Contenu accordéon */}
+      {isExpanded && hasRawData && (
+        <div className="ml-5 mt-2 p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700 space-y-3 text-xs">
+          
+          {/* 1. Source Excel */}
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 font-medium text-gray-700 dark:text-gray-300">
+              <FileSpreadsheet className="h-3.5 w-3.5 text-green-600" />
+              Source Excel
+            </div>
+            <div className="ml-5 space-y-0.5 text-gray-600 dark:text-gray-400">
+              <div>
+                <span className="text-gray-500">Valeur brute (v) :</span>{' '}
+                <span className="font-mono">{String(rawCell.v)}</span>
+                {rawCell.t && (
+                  <span className="text-gray-400 ml-2">
+                    [type: {rawCell.t === 'n' ? 'number' : rawCell.t === 's' ? 'string' : rawCell.t}]
+                  </span>
+                )}
+              </div>
+              {rawCell.z && (
+                <div>
+                  <span className="text-gray-500">Format Excel (z) :</span>{' '}
+                  <span className="font-mono">{rawCell.z}</span>
+                  {rawCell.isLocaleAwareFormat && (
+                    <span className="ml-2 px-1.5 py-0.5 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 rounded text-[10px]">
+                      locale-aware
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* 2. Interprétation locale (si locale-aware) */}
+          {isExcelDate && (
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 font-medium text-gray-700 dark:text-gray-300">
+                <Monitor className="h-3.5 w-3.5 text-amber-600" />
+                Affichage Excel (Windows FR)
+              </div>
+              <div className="ml-5 space-y-0.5 text-gray-600 dark:text-gray-400">
+                <div>
+                  <span className="text-gray-500">Tu vois :</span>{' '}
+                  <span className="font-mono font-medium text-amber-700 dark:text-amber-400">
+                    {String(sourceValue)}
+                  </span>
+                </div>
+                {rawCell.w && rawCell.w !== String(sourceValue) && (
+                  <div className="text-gray-500 text-[11px]">
+                    <span>ℹ️ Bibliothèque xlsx lit :</span>{' '}
+                    <span className="font-mono text-gray-400">{rawCell.w}</span>
+                    <span className="ml-1">(format US, nous utilisons ta valeur FR)</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* 3. Transformation */}
+          {hasTransformation && (
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 font-medium text-gray-700 dark:text-gray-300">
+                <Repeat className="h-3.5 w-3.5 text-blue-600" />
+                Transformation
+              </div>
+              <div className="ml-5 space-y-0.5 text-gray-600 dark:text-gray-400">
+                <div>
+                  <span className="text-gray-500">Règle :</span>{' '}
+                  <span>{getTransformationRule(rawCell.isLocaleAwareFormat, String(sourceValue).includes(':'), undefined)}</span>
+                </div>
+                <div>
+                  <span className="text-gray-500">Résultat :</span>{' '}
+                  <span className="font-mono font-medium text-blue-600 dark:text-blue-400">
+                    {transformedValue}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 4. Zoho Analytics */}
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 font-medium text-gray-700 dark:text-gray-300">
+              <Cloud className="h-3.5 w-3.5 text-purple-600" />
+              Zoho Analytics
+            </div>
+            <div className="ml-5 space-y-0.5 text-gray-600 dark:text-gray-400">
+              <div>
+                <span className="text-gray-500">Envoyé :</span>{' '}
+                <span className="font-mono">{transformedValue}</span>
+              </div>
+              {zohoPreview !== transformedValue && (
+                <div>
+                  <span className="text-gray-500">Sera affiché :</span>{' '}
+                  <span className="font-mono text-purple-600 dark:text-purple-400">
+                    {zohoPreview}
+                  </span>
+                </div>
+              )}
+              {zohoReferenceValue !== undefined && (
+                <div>
+                  <span className="text-gray-500">Exemple existant :</span>{' '}
+                  <span className="font-mono text-purple-500">
+                    {String(zohoReferenceValue)}
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 // =============================================================================
@@ -126,31 +381,61 @@ export function StepTransformPreview({
   parsedData,
   totalRows,
   zohoReferenceRow,
+  rawCellData,
+  fileType,
   onBack,
   onConfirm,
 }: StepTransformPreviewProps) {
   const [showAllColumns, setShowAllColumns] = useState(false);
   const [sampleCount, setSampleCount] = useState(5);
-  
+  const [expandedCells, setExpandedCells] = useState<AccordionRowState>({});
+
+  const isExcelFile = fileType === 'xlsx' || fileType === 'xls';
+  const hasRawData = isExcelFile && rawCellData && Object.keys(rawCellData).length > 0;
+
   // Filtrer les colonnes mappées
   const mappedColumns = matchedColumns.filter(col => col.isMapped);
-  
+
   // Colonnes avec transformation
-  const transformedColumns = mappedColumns.filter(col => 
+  const transformedColumns = mappedColumns.filter(col =>
     col.transformNeeded && col.transformNeeded !== 'none'
   );
-  
+
   // Colonnes sans transformation
-  const unchangedColumns = mappedColumns.filter(col => 
+  const unchangedColumns = mappedColumns.filter(col =>
     !col.transformNeeded || col.transformNeeded === 'none'
   );
-  
+
   // Données échantillons
   const sampleData = parsedData.slice(0, sampleCount);
-  
+
   // Colonnes à afficher
   const displayColumns = showAllColumns ? mappedColumns : transformedColumns;
-  
+
+  // Toggle accordéon
+  const toggleCell = (rowIndex: number, columnName: string) => {
+    const key = `${rowIndex}-${columnName}`;
+    setExpandedCells(prev => ({
+      ...prev,
+      [key]: !prev[key],
+    }));
+  };
+
+  // Expand/Collapse all
+  const expandAll = () => {
+    const newState: AccordionRowState = {};
+    sampleData.forEach((_, rowIndex) => {
+      displayColumns.forEach(col => {
+        newState[`${rowIndex}-${col.fileColumn}`] = true;
+      });
+    });
+    setExpandedCells(newState);
+  };
+
+  const collapseAll = () => {
+    setExpandedCells({});
+  };
+
   return (
     <div className="space-y-6">
       {/* En-tête */}
@@ -160,6 +445,11 @@ export function StepTransformPreview({
         </h2>
         <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
           Vérifiez comment vos données seront transformées avant l'import dans Zoho
+          {hasRawData && (
+            <span className="ml-1 text-purple-600 dark:text-purple-400">
+              • Cliquez sur une cellule pour voir les détails Excel
+            </span>
+          )}
         </p>
       </div>
 
@@ -175,14 +465,14 @@ export function StepTransformPreview({
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <StatBox value={totalRows} label="Lignes à importer" />
             <StatBox value={mappedColumns.length} label="Colonnes mappées" />
-            <StatBox 
-              value={transformedColumns.length} 
-              label="Avec transformation" 
+            <StatBox
+              value={transformedColumns.length}
+              label="Avec transformation"
               highlight="blue"
             />
-            <StatBox 
-              value={unchangedColumns.length} 
-              label="Sans modification" 
+            <StatBox
+              value={unchangedColumns.length}
+              label="Sans modification"
               highlight="green"
             />
           </div>
@@ -190,8 +480,8 @@ export function StepTransformPreview({
       </Card>
 
       {/* Toggle affichage */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <Button
             variant={showAllColumns ? 'outline' : 'primary'}
             size="sm"
@@ -206,10 +496,30 @@ export function StepTransformPreview({
             onClick={() => setShowAllColumns(true)}
           >
             <Eye className="h-4 w-4 mr-2" />
-            Toutes les colonnes ({mappedColumns.length})
+            Toutes ({mappedColumns.length})
           </Button>
+          
+          {hasRawData && (
+            <>
+              <div className="w-px h-6 bg-gray-300 dark:bg-gray-600 mx-1" />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={expandAll}
+              >
+                Tout déplier
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={collapseAll}
+              >
+                Tout replier
+              </Button>
+            </>
+          )}
         </div>
-        
+
         <select
           value={sampleCount}
           onChange={(e) => setSampleCount(Number(e.target.value))}
@@ -233,7 +543,7 @@ export function StepTransformPreview({
                       #
                     </th>
                    {displayColumns.map((col) => (
-                      <th key={col.fileColumn} className="px-3 py-2 text-left min-w-[200px]">
+                      <th key={col.fileColumn} className="px-3 py-2 text-left min-w-[220px]">
                         <div className="flex flex-col gap-1">
                           <span className="font-medium text-gray-900 dark:text-gray-100">
                             {col.fileColumn}
@@ -263,57 +573,30 @@ export function StepTransformPreview({
                 <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
                   {sampleData.map((row, rowIndex) => (
                     <tr key={rowIndex} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
-                      <td className="px-3 py-2 text-gray-400 text-xs">
+                      <td className="px-3 py-2 text-gray-400 text-xs align-top">
                         {rowIndex + 1}
                       </td>
                      {displayColumns.map((col) => {
-                        const sourceValue = String(row[col.fileColumn] ?? '');
-                        const transformedValue = applyTransformation(sourceValue, col.transformNeeded);
+                        const sourceValue = row[col.fileColumn] ?? '';
+                        const transformedValue = applyTransformation(String(sourceValue), col.transformNeeded);
                         const zohoPreview = predictZohoDisplay(transformedValue, col.zohoType);
-                        const hasChanged = sourceValue !== transformedValue && sourceValue !== '';
-                        const zohoWillDiffer = transformedValue !== zohoPreview;
+                        const rawCell = rawCellData?.[rowIndex]?.[col.fileColumn];
+                        const isExpanded = expandedCells[`${rowIndex}-${col.fileColumn}`] || false;
 
                         return (
-                          <td key={col.fileColumn} className="px-3 py-2">
-                            <div className="flex flex-col gap-1">
-                              {/* 📄 Valeur source (fichier) */}
-                              <div className="flex items-center gap-2">
-                                <span className="text-gray-400 text-xs">📄</span>
-                                <span className="font-mono text-gray-600 dark:text-gray-400 text-xs">
-                                  {sourceValue || <span className="italic text-gray-400">(vide)</span>}
-                                </span>
-                              </div>
-
-                              {/* 🔄 Valeur transformée (envoyée à Zoho) */}
-                              {hasChanged && (
-                                <div className="flex items-center gap-2">
-                                  <span className="text-blue-500 text-xs">🔄</span>
-                                  <span className="font-mono text-blue-600 dark:text-blue-400 font-medium text-xs">
-                                    {transformedValue}
-                                  </span>
-                                </div>
-                              )}
-
-                              {/* 👁️ Zoho affichera */}
-                              {sourceValue && zohoWillDiffer && (
-                                <div className="flex items-center gap-2">
-                                  <span className="text-purple-500 text-xs">👁️</span>
-                                  <span className="font-mono text-purple-600 dark:text-purple-400 text-xs">
-                                    {zohoPreview}
-                                  </span>
-                                </div>
-                              )}
-
-                              {/* ✅ Inchangé */}
-                              {sourceValue && !hasChanged && !zohoWillDiffer && (
-                                <div className="flex items-center gap-2">
-                                  <Check className="h-3 w-3 text-green-500 shrink-0" />
-                                  <span className="text-xs text-green-600 dark:text-green-400">
-                                    Inchangé
-                                  </span>
-                                </div>
-                              )}
-                            </div>
+                          <td key={col.fileColumn} className="px-3 py-2 align-top">
+                            <CellDetailAccordion
+                              columnName={col.fileColumn}
+                              rowIndex={rowIndex}
+                              sourceValue={sourceValue}
+                              transformedValue={transformedValue}
+                              zohoPreview={zohoPreview}
+                              zohoType={col.zohoType}
+                              zohoReferenceValue={zohoReferenceRow?.[col.zohoColumn ?? '']}
+                              rawCell={rawCell}
+                              isExpanded={isExpanded}
+                              onToggle={() => toggleCell(rowIndex, col.fileColumn)}
+                            />
                           </td>
                         );
                       })}
@@ -365,10 +648,17 @@ export function StepTransformPreview({
         <div className="space-y-2">
           <p>Chaque cellule montre le flux de transformation de vos données :</p>
           <ul className="text-sm space-y-1">
-            <li><span className="mr-2">📄</span><strong>Fichier Excel</strong> : Valeur brute de votre fichier</li>
-            <li><span className="mr-2">🔄</span><strong>Sera envoyé</strong> : Valeur après transformation (si différente)</li>
-            <li><span className="mr-2">👁️</span><strong>Zoho affichera</strong> : Format d'affichage dans Zoho (ex: dates)</li>
+            <li><span className="mr-2">📄</span><strong>Source</strong> : Valeur dans votre fichier</li>
+            <li><span className="mr-2">→</span><strong>Transformé</strong> : Valeur après transformation (si différente)</li>
+            {hasRawData && (
+              <li><span className="mr-2">🔍</span><strong>Détails</strong> : Cliquez pour voir les infos Excel (v, z, w)</li>
+            )}
           </ul>
+          {hasRawData && (
+            <p className="text-xs text-purple-600 dark:text-purple-400 mt-2">
+              💡 Les fichiers Excel ont des métadonnées supplémentaires. Cliquez sur une cellule pour comprendre exactement comment elle est transformée.
+            </p>
+          )}
         </div>
       </Alert>
 
@@ -390,21 +680,21 @@ export function StepTransformPreview({
 // SOUS-COMPOSANTS
 // =============================================================================
 
-function StatBox({ 
-  value, 
-  label, 
-  highlight 
-}: { 
-  value: number; 
-  label: string; 
+function StatBox({
+  value,
+  label,
+  highlight
+}: {
+  value: number;
+  label: string;
   highlight?: 'blue' | 'green';
 }) {
-  const bgClass = highlight === 'blue' 
-    ? 'bg-blue-50 dark:bg-blue-900/20' 
+  const bgClass = highlight === 'blue'
+    ? 'bg-blue-50 dark:bg-blue-900/20'
     : highlight === 'green'
     ? 'bg-green-50 dark:bg-green-900/20'
     : 'bg-gray-50 dark:bg-gray-800';
-    
+
   const textClass = highlight === 'blue'
     ? 'text-blue-600 dark:text-blue-400'
     : highlight === 'green'

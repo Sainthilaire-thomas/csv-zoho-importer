@@ -425,13 +425,18 @@ function detectValueType(value: string): FileColumnType {
     return 'duration';
   }
   
-  // Date (formats courants)
+ // Date (formats courants) - avec ou sans heure
   const datePatterns = [
-    /^\d{2}\/\d{2}\/\d{4}$/,           // DD/MM/YYYY ou MM/DD/YYYY
-    /^\d{4}-\d{2}-\d{2}$/,             // YYYY-MM-DD (ISO)
-    /^\d{2}-\d{2}-\d{4}$/,             // DD-MM-YYYY
-    /^\d{4}\/\d{2}\/\d{2}$/,           // YYYY/MM/DD
-    /^\d{2}\.\d{2}\.\d{4}$/,           // DD.MM.YYYY
+    /^\d{2}\/\d{2}\/\d{4}$/,                          // DD/MM/YYYY ou MM/DD/YYYY
+    /^\d{2}\/\d{2}\/\d{4}\s+\d{1,2}:\d{2}(:\d{2})?$/, // DD/MM/YYYY HH:mm ou HH:mm:ss
+    /^\d{4}-\d{2}-\d{2}$/,                            // YYYY-MM-DD (ISO)
+    /^\d{4}-\d{2}-\d{2}\s+\d{1,2}:\d{2}(:\d{2})?$/,   // YYYY-MM-DD HH:mm:ss
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?/,        // ISO avec T
+    /^\d{2}-\d{2}-\d{4}$/,                            // DD-MM-YYYY
+    /^\d{2}-\d{2}-\d{4}\s+\d{1,2}:\d{2}(:\d{2})?$/,   // DD-MM-YYYY HH:mm:ss
+    /^\d{4}\/\d{2}\/\d{2}$/,                          // YYYY/MM/DD
+    /^\d{2}\.\d{2}\.\d{4}$/,                          // DD.MM.YYYY
+    /^[a-zéûôA-ZÉÛÔ]+-\d{2,4}$/,                      // Période mois-année (juin-25, janv-2024)
   ];
   
   if (datePatterns.some(pattern => pattern.test(trimmed))) {

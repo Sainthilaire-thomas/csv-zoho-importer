@@ -445,6 +445,10 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
             if (result.columnMetadata) {
               wizardState.schema.setColumnMetadata(result.columnMetadata);
             }
+            // Stocker les données brutes Excel pour l'UI accordéon (Phase 2)
+            if (result.rawCellData) {
+              wizardState.schema.setRawCellData(result.rawCellData);
+            }
           });
           return <div className="text-center p-8">Analyse du fichier en cours...</div>;
         }
@@ -509,6 +513,8 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
         );
 
       case 'previewing':
+        const fileExtension = state.config.file?.name.split('.').pop()?.toLowerCase();
+        const fileType = fileExtension === 'xlsx' || fileExtension === 'xls' ? fileExtension : 'csv';
         return (
           <StepTransformPreview
             autoTransformations={wizardState.schema.schemaValidation?.autoTransformations || []}
@@ -516,6 +522,8 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
             parsedData={wizardState.schema.parsedData || []}
             totalRows={state.validation?.totalRows || 0}
             zohoReferenceRow={wizardState.schema.zohoReferenceRow}
+            rawCellData={wizardState.schema.rawCellData ?? undefined}
+            fileType={fileType}
             onBack={() => goToStep('configuring')}
             onConfirm={() => goToStep('reviewing')}
           />

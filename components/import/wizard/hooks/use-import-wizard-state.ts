@@ -3,7 +3,7 @@
 
 import { useState, useRef, useCallback } from 'react';
 import type { SchemaValidationResult, ZohoTableSchema, ResolvableIssue } from '@/lib/infrastructure/zoho/types';
-import type { ImportProfile, ProfileMatchResult, DetectedColumn } from '@/types/profiles';
+import type { ImportProfile, ProfileMatchResult, DetectedColumn, RawCellDataMap } from '@/types/profiles';
 import type { SentRow, MatchingColumnResult } from '@/lib/domain/verification';
 import type { PreImportCheckResult } from '@/lib/domain/rowid-sync/types';
 
@@ -31,12 +31,14 @@ export interface WorkspacesState {
 
 export interface SchemaState {
   parsedData: Record<string, unknown>[] | null;
-  columnMetadata: Record<string, import('@/types/profiles').ExcelColumnMeta> | null;  // NOUVEAU
+  columnMetadata: Record<string, import('@/types/profiles').ExcelColumnMeta> | null;
+  rawCellData: RawCellDataMap | null;  // NOUVEAU Phase 2
   schemaValidation: SchemaValidationResult | null;
   zohoSchema: ZohoTableSchema | null;
   zohoReferenceRow: Record<string, unknown> | null;
   setParsedData: (data: Record<string, unknown>[] | null) => void;
-  setColumnMetadata: (metadata: Record<string, import('@/types/profiles').ExcelColumnMeta> | null) => void;  // NOUVEAU
+  setColumnMetadata: (metadata: Record<string, import('@/types/profiles').ExcelColumnMeta> | null) => void;
+  setRawCellData: (data: RawCellDataMap | null) => void;  // NOUVEAU Phase 2
   setSchemaValidation: (result: SchemaValidationResult | null) => void;
   setZohoSchema: (schema: ZohoTableSchema | null) => void;
   setZohoReferenceRow: (row: Record<string, unknown> | null) => void;
@@ -127,6 +129,7 @@ export function useImportWizardState(): ImportWizardState {
   // ─────────────────────────────────────────────────────────────────────────
   const [parsedData, setParsedData] = useState<Record<string, unknown>[] | null>(null);
   const [columnMetadata, setColumnMetadata] = useState<Record<string, import('@/types/profiles').ExcelColumnMeta> | null>(null);  // NOUVEAU
+  const [rawCellData, setRawCellData] = useState<RawCellDataMap | null>(null);  // NOUVEAU Phase 2
   const [schemaValidation, setSchemaValidation] = useState<SchemaValidationResult | null>(null);const [zohoSchema, setZohoSchema] = useState<ZohoTableSchema | null>(null);
   const [zohoReferenceRow, setZohoReferenceRow] = useState<Record<string, unknown> | null>(null);
 
@@ -212,7 +215,8 @@ export function useImportWizardState(): ImportWizardState {
   const resetAll = useCallback(() => {
     // Schema
     setParsedData(null);
-     setColumnMetadata(null); 
+    setColumnMetadata(null); 
+    setRawCellData(null);  // NOUVEAU Phase 2
     setSchemaValidation(null);
     setZohoSchema(null);
     setZohoReferenceRow(null);
@@ -243,12 +247,14 @@ export function useImportWizardState(): ImportWizardState {
 
     schema: {
       parsedData,
-      columnMetadata,  // NOUVEAU
+      columnMetadata,
+      rawCellData,  // NOUVEAU Phase 2
       schemaValidation,
       zohoSchema,
       zohoReferenceRow,
       setParsedData,
-      setColumnMetadata,  // NOUVEAU
+      setColumnMetadata,
+      setRawCellData,  // NOUVEAU Phase 2
       setSchemaValidation,
       setZohoSchema,
       setZohoReferenceRow,
