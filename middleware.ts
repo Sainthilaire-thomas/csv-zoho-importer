@@ -1,7 +1,7 @@
+// middleware.ts
+
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
-
-const cookieDomain = process.env.NODE_ENV === 'production' ? '.sonear.com' : undefined;
 
 export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
@@ -24,10 +24,7 @@ export async function middleware(request: NextRequest) {
             request,
           });
           cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, {
-              ...options,
-              domain: cookieDomain,
-            })
+            supabaseResponse.cookies.set(name, value, options)
           );
         },
       },
@@ -38,42 +35,25 @@ export async function middleware(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const authUrl = process.env.NEXT_PUBLIC_AUTH_URL || 'https://auth.sonear.com';
-  const appSlug = 'csv-importer';
-  const currentUrl = request.nextUrl.toString();
-
-  // Routes publiques (pas de protection)
-  const publicRoutes = ['/unauthorized', '/api/'];
-  const isPublicRoute = publicRoutes.some((route) =>
+  // Routes protégées
+  const protectedRoutes = ['/import', '/history', '/settings'];
+  const isProtectedRoute = protectedRoutes.some((route) =>
     request.nextUrl.pathname.startsWith(route)
   );
 
-  if (isPublicRoute) {
-    return supabaseResponse;
-  }
-
-  // Si pas connecté, rediriger vers Auth Central
-  if (!user) {
-    const loginUrl = `${authUrl}/login?app=${appSlug}&redirect=${encodeURIComponent(currentUrl)}`;
-    return NextResponse.redirect(loginUrl);
-  }
-
-  // Vérifier l'accès à l'application dans user_app_access
-  const { data: access } = await supabase
-    .from('user_app_access')
-    .select('id, role')
-    .eq('user_id', user.id)
-    .eq('app_slug', appSlug)
-    .single();
-
-  // Si pas d'accès, rediriger vers la page unauthorized
-  if (!access) {
+  if (isProtectedRoute && !user) {
     const url = request.nextUrl.clone();
-    url.pathname = '/unauthorized';
+    url.pathname = '/login';
     return NextResponse.redirect(url);
   }
 
-  // Tout est OK, continuer
+  // Rediriger vers /import si connecté et sur /login
+  if (request.nextUrl.pathname === '/login' && user) {
+    const url = request.nextUrl.clone();
+    url.pathname = '/import';
+    return NextResponse.redirect(url);
+  }
+
   return supabaseResponse;
 }
 
