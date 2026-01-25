@@ -55,6 +55,7 @@ export const ZOHO_SCOPES = [
   'ZohoAnalytics.data.all',
   'ZohoAnalytics.embed.read',
   'ZohoAnalytics.embed.update',
+  'aaaserver.profile.READ',
 ] as const;
 
 /**
@@ -176,6 +177,7 @@ export interface ZohoColumn {
   isUnique?: boolean;
   isLookup?: boolean;
   isMandatory?: boolean;
+  dateFormat?: string;  // Format d'affichage des dates (ex: "MM/yyyy", "dd MMM yyyy HH:mm:ss")
 }
 
 /**

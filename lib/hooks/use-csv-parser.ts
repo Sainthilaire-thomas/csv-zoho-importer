@@ -284,11 +284,11 @@ function excelSerialToDateString(serial: number, format: string): string {
   const month = (date.getMonth() + 1).toString().padStart(2, '0');
   const year = date.getFullYear();
 
-  // Partie heure si présente dans le format
+ // Partie heure si présente dans la VALEUR (pas seulement le format)
+  // Le format Excel peut masquer l'heure (m/d/yy) même si la valeur la contient
   let timeStr = '';
-  const hasTimeInFormat = /h/i.test(format);
 
-  if (timeFraction > 0.0001 && hasTimeInFormat) {
+  if (timeFraction > 0.0001) {
     const totalSeconds = Math.round(timeFraction * 24 * 60 * 60);
     const hours = Math.floor(totalSeconds / 3600).toString().padStart(2, '0');
     const minutes = Math.floor((totalSeconds % 3600) / 60).toString().padStart(2, '0');

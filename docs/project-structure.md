@@ -1,6 +1,6 @@
 ﻿# Structure du projet - csv-zoho-importer
 
-*Genere le 2026-01-24 19:04:35*
+*Genere le 2026-01-25 16:41:50*
 ```
 csv-zoho-importer/
 |-- .vscode/
@@ -182,6 +182,7 @@ csv-zoho-importer/
 |   |-- architecture-cible-v3.md
 |   |-- doc-session.md
 |   |-- project-structure.md
+|   |-- resume-ameliorations-csv-zoho-importer.pdf
 |   |-- specs-auth-centralisee.md
 |   |-- specs-fonctionnelles.md
 |   |-- specs-preview-verification.md

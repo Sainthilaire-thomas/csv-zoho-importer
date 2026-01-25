@@ -597,35 +597,52 @@ const MONTH_MAP: Record<string, string> = {
 };
 
 /**
- * Tente de parser une chaîne comme date et retourne un format canonique YYYY-MM-DD
- * Gère plusieurs formats : ISO, Zoho, FR
+ * Essaie de parser une date et retourne un format canonique (YYYY-MM-DD)
+ * Gère plusieurs formats : ISO, Zoho (avec et sans virgule), FR, MM/yyyy
  */
 function tryParseDateToCanonical(str: string): string | null {
   if (!str || typeof str !== 'string') return null;
 
   const trimmed = str.trim();
 
-  // Format ISO : 2025-04-04 ou 2025-04-04T00:00:00
+  // Format ISO : 2025-04-04 ou 2025-04-04 09:01:00 ou 2025-04-04T00:00:00
   const isoMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (isoMatch) {
     return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
   }
 
-  // Format Zoho : "04 Apr, 2025 00:00:00" ou "04 Apr, 2025"
-  const zohoMatch = trimmed.match(/^(\d{2}) (\w{3}), (\d{4})/);
-  if (zohoMatch) {
-    const day = zohoMatch[1];
-    const month = MONTH_MAP[zohoMatch[2]];
-    const year = zohoMatch[3];
+  // Format Zoho avec virgule : "04 Apr, 2025 00:00:00" ou "04 Apr, 2025"
+  const zohoWithCommaMatch = trimmed.match(/^(\d{2}) (\w{3}), (\d{4})/);
+  if (zohoWithCommaMatch) {
+    const day = zohoWithCommaMatch[1];
+    const month = MONTH_MAP[zohoWithCommaMatch[2]];
+    const year = zohoWithCommaMatch[3];
     if (month) {
       return `${year}-${month}-${day}`;
     }
   }
 
-  // Format FR : 04/04/2025
-  const frMatch = trimmed.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  // Format Zoho sans virgule : "01 Apr 2025 09:01:00" ou "01 Apr 2025"
+  const zohoNoCommaMatch = trimmed.match(/^(\d{2}) (\w{3}) (\d{4})/);
+  if (zohoNoCommaMatch) {
+    const day = zohoNoCommaMatch[1];
+    const month = MONTH_MAP[zohoNoCommaMatch[2]];
+    const year = zohoNoCommaMatch[3];
+    if (month) {
+      return `${year}-${month}-${day}`;
+    }
+  }
+
+  // Format FR : 04/04/2025 ou 04/04/2025 09:01:00
+  const frMatch = trimmed.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
   if (frMatch) {
     return `${frMatch[3]}-${frMatch[2]}-${frMatch[1]}`;
+  }
+
+  // Format MM/yyyy (période) : 04/2025 → 2025-04-01
+  const periodMatch = trimmed.match(/^(\d{2})\/(\d{4})$/);
+  if (periodMatch) {
+    return `${periodMatch[2]}-${periodMatch[1]}-01`;
   }
 
   return null;

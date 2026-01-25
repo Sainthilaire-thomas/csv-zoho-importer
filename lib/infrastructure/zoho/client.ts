@@ -368,6 +368,7 @@ export class ZohoAnalyticsClient {
             isUnique?: boolean;
             isLookup?: boolean;
             isMandatory?: boolean;
+            dateFormat?: string;  // Format d'affichage des dates
           }>;
         };
       };
@@ -379,7 +380,7 @@ export class ZohoAnalyticsClient {
       `/views/${viewId}?CONFIG=${configEncoded}`
     );
 
-    console.log('[getColumns] Response:', JSON.stringify(response.data?.views, null, 2).substring(0, 500));
+    console.log('[getColumns] Response:', JSON.stringify(response.data?.views, null, 2).substring(0, 5000));
 
     const columns = response.data?.views?.columns || [];
     
@@ -390,6 +391,7 @@ export class ZohoAnalyticsClient {
       isUnique: col.isUnique,
       isLookup: col.isLookup,
       isMandatory: col.isMandatory,
+      dateFormat: col.dateFormat,  // Format d'affichage des dates Zoho
     }));
   }
 

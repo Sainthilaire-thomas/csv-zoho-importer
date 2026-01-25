@@ -14,6 +14,7 @@
 
 import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { applyTransformation as applyTransformationFromLib } from '@/lib/domain/data-transformer';
 import { Button } from '@/components/ui/button';
 import { Alert } from '@/components/ui/alert';
 import {
@@ -57,44 +58,12 @@ interface AccordionRowState {
 // HELPERS - Simulation des transformations
 // =============================================================================
 
-function applyTransformation(value: string, transformType: string | undefined): string {
+// =============================================================================
+// HELPERS - Utilisation des transformations centralisées
+// =============================================================================
+function applyTransformationLocal(value: string, transformType: string | undefined, zohoDateFormat?: string): string {
   if (!value || (typeof value === 'string' && value.trim() === '')) return '';
-
-  const strValue = String(value);
-
-  switch (transformType) {
-    case 'date_format':
-      // Simuler conversion DD/MM/YYYY → YYYY-MM-DD
-      // Avec heure: DD/MM/YYYY HH:mm:ss → YYYY-MM-DD HH:mm:ss
-      const dateTimeMatch = strValue.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2}):(\d{2})$/);
-      if (dateTimeMatch) {
-        return `${dateTimeMatch[3]}-${dateTimeMatch[2]}-${dateTimeMatch[1]} ${dateTimeMatch[4]}:${dateTimeMatch[5]}:${dateTimeMatch[6]}`;
-      }
-      const dateMatch = strValue.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-      if (dateMatch) {
-        return `${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}`;
-      }
-      return strValue;
-
-    case 'number_format':
-      // Simuler conversion 1 234,56 → 1234.56
-      return strValue.replace(/\s/g, '').replace(',', '.');
-
-    case 'duration_format':
-      // Simuler conversion 9:30 → 09:30:00
-      const durationMatch = strValue.match(/^(\d{1,2}):(\d{2})$/);
-      if (durationMatch) {
-        const hours = durationMatch[1].padStart(2, '0');
-        return `${hours}:${durationMatch[2]}:00`;
-      }
-      return strValue;
-
-    case 'trim':
-      return strValue.trim();
-
-    default:
-      return strValue;
-  }
+  return applyTransformationFromLib(String(value), transformType, zohoDateFormat);
 }
 
 function getTransformLabel(transformType: string | undefined): string | null {
@@ -578,7 +547,7 @@ export function StepTransformPreview({
                       </td>
                      {displayColumns.map((col) => {
                         const sourceValue = row[col.fileColumn] ?? '';
-                        const transformedValue = applyTransformation(String(sourceValue), col.transformNeeded);
+                        const transformedValue = applyTransformationLocal(String(sourceValue), col.transformNeeded, col.zohoDateFormat);
                         const zohoPreview = predictZohoDisplay(transformedValue, col.zohoType);
                         const rawCell = rawCellData?.[rowIndex]?.[col.fileColumn];
                         const isExpanded = expandedCells[`${rowIndex}-${col.fileColumn}`] || false;

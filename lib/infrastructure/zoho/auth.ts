@@ -226,8 +226,9 @@ async function fetchOrgId(accessToken: string, apiDomain: string): Promise<strin
       return null;
     }
 
+   
     const data = await response.json();
-    
+console.log('fetchOrgId - Réponse complète:', JSON.stringify(data, null, 2));  // TEMPORAIRE
     // La réponse contient data.orgs qui est un tableau d'organisations
     const orgs = data?.data?.orgs || [];
     
@@ -241,6 +242,49 @@ async function fetchOrgId(accessToken: string, apiDomain: string): Promise<strin
     return null;
   } catch (error) {
     console.error('fetchOrgId - Erreur:', error);
+    return null;
+  }
+}
+
+
+/**
+ * Récupère les informations de l'utilisateur Zoho (email, userId)
+ * Utilise l'API OAuth user info de Zoho Accounts
+ * NOUVEAU : Cette fonction est appelée après le callback OAuth
+ */
+async function fetchZohoUserInfo(
+  accessToken: string, 
+  accountsDomain: string
+): Promise<{ email: string; zohoUserId: string } | null> {
+  try {
+    console.log('fetchZohoUserInfo - Récupération des infos utilisateur...');
+    
+    const response = await fetch(`${accountsDomain}/oauth/user/info`, {
+      headers: {
+        'Authorization': `Zoho-oauthtoken ${accessToken}`,
+      },
+    });
+
+    if (!response.ok) {
+      console.error('fetchZohoUserInfo - Erreur HTTP:', response.status);
+      return null;
+    }
+
+    const data = await response.json();
+    
+    // La réponse contient Email et ZUID
+    const email = data?.Email;
+    const zohoUserId = data?.ZUID?.toString();
+    
+    if (email) {
+      console.log('fetchZohoUserInfo - Email trouvé:', email);
+      return { email, zohoUserId: zohoUserId || '' };
+    }
+
+    console.log('fetchZohoUserInfo - Aucun email trouvé dans la réponse:', JSON.stringify(data).substring(0, 200));
+    return null;
+  } catch (error) {
+    console.error('fetchZohoUserInfo - Erreur:', error);
     return null;
   }
 }
@@ -279,6 +323,10 @@ export async function storeTokens(
   const orgId = await fetchOrgId(tokenResponse.access_token, apiDomain);
   console.log('storeTokens - orgId récupéré:', orgId);
 
+  // NOUVEAU : Récupérer les infos utilisateur Zoho (email, userId)
+  const userInfo = await fetchZohoUserInfo(tokenResponse.access_token, accountsDomain);
+  console.log('storeTokens - userInfo récupéré:', userInfo);
+
   // Calculer la date d'expiration
   const expiresAt = new Date(Date.now() + tokenResponse.expires_in * 1000);
 
@@ -299,6 +347,8 @@ export async function storeTokens(
       api_domain: apiDomain,
       accounts_domain: accountsDomain,
       org_id: orgId,  // NOUVEAU : Stocker l'orgId
+      zoho_email: userInfo?.email || null,  // NOUVEAU : Stocker l'email Zoho
+      zoho_user_id: userInfo?.zohoUserId || null,  // NOUVEAU : Stocker le userId Zoho
       updated_at: new Date().toISOString(),
     }, {
       onConflict: 'user_id',

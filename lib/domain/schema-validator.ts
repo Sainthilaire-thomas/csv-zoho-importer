@@ -437,8 +437,9 @@ function detectValueType(value: string): FileColumnType {
     /^\d{4}\/\d{2}\/\d{2}$/,                          // YYYY/MM/DD
     /^\d{2}\.\d{2}\.\d{4}$/,                          // DD.MM.YYYY
     /^[a-zéûôA-ZÉÛÔ]+-\d{2,4}$/,                      // Période mois-année (juin-25, janv-2024)
+    /^\d{1,2}\/\d{4}$/,                               // Période numérique mois/année (4/2025, 04/2025)
   ];
-  
+
   if (datePatterns.some(pattern => pattern.test(trimmed))) {
     return 'date';
   }
@@ -778,6 +779,7 @@ export function validateSchema(params: ValidateSchemaParams): SchemaValidationRe
         zohoColumn: zohoColumn.columnName,
         fileType,
         zohoType: zohoColumn.dataType,
+        zohoDateFormat: zohoColumn.dateFormat,  // Format de date Zoho (ex: "MM/yyyy")
         isCompatible,
         isMapped: true,
         isRequired: zohoColumn.isMandatory || false,
