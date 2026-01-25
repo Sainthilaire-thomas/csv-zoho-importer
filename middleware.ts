@@ -1,6 +1,8 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
+const cookieDomain = process.env.NODE_ENV === 'production' ? '.sonear.com' : undefined;
+
 export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
     request,
@@ -22,7 +24,10 @@ export async function middleware(request: NextRequest) {
             request,
           });
           cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, options)
+            supabaseResponse.cookies.set(name, value, {
+              ...options,
+              domain: cookieDomain,
+            })
           );
         },
       },
@@ -33,7 +38,7 @@ export async function middleware(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const authUrl = process.env.NEXT_PUBLIC_AUTH_URL || 'https://auth-central-six.vercel.app';
+  const authUrl = process.env.NEXT_PUBLIC_AUTH_URL || 'https://auth.sonear.com';
   const appSlug = 'csv-importer';
   const currentUrl = request.nextUrl.toString();
 
