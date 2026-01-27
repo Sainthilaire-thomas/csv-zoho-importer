@@ -42,7 +42,7 @@ const PATTERNS = {
   NUMBER_FR_SIMPLE: /^-?\d+,\d+$/,                    // 1234,56 (virgule décimale)
   NUMBER_US: /^-?\d{1,3}(?:,\d{3})*(?:\.\d+)?$/,     // 1,234.56 (virgule milliers, point décimal)
   NUMBER_US_SIMPLE: /^-?\d+\.\d+$/,                   // 1234.56 (point décimal)
-  NUMBER_SCIENTIFIC: /^-?\d+(?:\.\d+)?[eE][+-]?\d+$/, // 1E6, 1.5E-3
+  NUMBER_SCIENTIFIC: /^-?\d+(?:[.,]\d+)?[eE][+-]?\d+$/, // 1E6, 1.5E-3, 9,41258E+11
 
   // Booléens
   BOOLEAN_FR: /^(oui|non|vrai|faux)$/i,

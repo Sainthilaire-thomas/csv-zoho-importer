@@ -92,9 +92,12 @@ export function StepProfile({
 
     try {
        // 1. Détecter les types de colonnes (avec métadonnées Excel si disponibles)
-      const columns = detectColumnTypes(fileData, { 
-        excelMetadata: columnMetadata ?? undefined 
+     const columns = detectColumnTypes(fileData, {
+        excelMetadata: columnMetadata ?? undefined
       });
+      
+      // Stocker les colonnes détectées dans l'état local
+      setDetectedColumns(columns);
 
       // 2. Chercher les profils compatibles
       const matches = await profileManager.findMatchingProfiles(columns);

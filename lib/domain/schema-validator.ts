@@ -41,8 +41,9 @@ interface ValidateSchemaParams {
  */
 function isScientificNotation(value: string): boolean {
   const trimmed = value.trim();
-  // Patterns: 1.5E6, 1.5e6, 1E10, 3.14e-2, etc.
-  return /^-?\d+\.?\d*[eE][+-]?\d+$/.test(trimmed);
+  // Patterns: 1.5E6, 1.5e6, 1E10, 3.14e-2, 9,41258E+11 (virgule FR)
+  // Accepte point OU virgule comme séparateur décimal
+  return /^-?\d+[.,]?\d*[eE][+-]?\d+$/.test(trimmed);
 }
 
 /**

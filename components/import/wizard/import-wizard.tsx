@@ -131,6 +131,27 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
   }, [wizardState.schema]);
 
   // ─────────────────────────────────────────────────────────────────────────
+  // Helper : Mapper les noms de colonnes fichier → Zoho pour l'API
+  // ─────────────────────────────────────────────────────────────────────────
+  const getZohoMatchingColumns = useCallback((): string[] => {
+    const fileColumns = wizardState.profile.matchingColumns;
+    const matchedColumns = wizardState.schema.schemaValidation?.matchedColumns;
+    
+    if (!matchedColumns || fileColumns.length === 0) {
+      return fileColumns;
+    }
+    
+    return fileColumns.map(fileCol => {
+      const mapping = matchedColumns.find(m => m.fileColumn === fileCol);
+      const zohoName = mapping?.zohoColumn || fileCol;
+      if (zohoName !== fileCol) {
+        console.log(`[MatchingColumns] Mapped "${fileCol}" → "${zohoName}"`);
+      }
+      return zohoName;
+    });
+  }, [wizardState.profile.matchingColumns, wizardState.schema.schemaValidation?.matchedColumns]);
+
+  // ─────────────────────────────────────────────────────────────────────────
   // Test import (extracted hook)
   // ─────────────────────────────────────────────────────────────────────────
   const testImportActions = useTestImport({
@@ -148,7 +169,7 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
       workspaceName: wizardState.workspaces.workspaces.find(
         w => w.id === wizardState.workspaces.selectedId
       )?.name || '',
-    matchingColumns: wizardState.profile.matchingColumns,
+      matchingColumns: getZohoMatchingColumns(),
     selectedProfile: wizardState.profile.selectedProfile,
     zohoColumns: wizardState.schema.zohoSchema?.columns,
     getColumnTypesFromSchema,
@@ -180,7 +201,7 @@ export function ImportWizard({ className = '' }: ImportWizardProps) {
       workspaceName: wizardState.workspaces.workspaces.find(
         w => w.id === wizardState.workspaces.selectedId
       )?.name || '',
-    matchingColumns: wizardState.profile.matchingColumns,
+    matchingColumns: getZohoMatchingColumns(),
     getColumnTypesFromSchema,
     saveOrUpdateProfile: profileActions.saveOrUpdateProfile,
     importActions: {

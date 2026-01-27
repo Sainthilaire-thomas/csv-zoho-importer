@@ -13,11 +13,19 @@ import type { ProfileState, TestImportState, RowIdState, SchemaState } from './u
 // Constants
 // ============================================================================
 
+
+
 /** Nombre de lignes par chunk (~ 1-2MB selon les données) */
 export const CHUNK_SIZE = 5000;
 
 /** Nombre de tentatives par chunk en cas d'erreur */
-export const MAX_RETRIES = 2;
+export const MAX_RETRIES = 3;
+
+/** Délai entre les chunks en ms (évite rate limiting Zoho) */
+export const CHUNK_DELAY_MS = 600;
+
+/** Délai après erreur rate limiting (backoff exponentiel base) */
+export const RATE_LIMIT_BACKOFF_MS = 2000;
 
 // ============================================================================
 // Types
@@ -128,9 +136,10 @@ export function useChunkedImport(config: ChunkedImportConfig): ChunkedImportActi
 
     for (let retry = 0; retry <= MAX_RETRIES; retry++) {
       if (retry > 0) {
-        console.log(`[Import] Retry ${retry}/${MAX_RETRIES} pour chunk ${chunkIndex + 1}`);
-        // Backoff exponentiel : 1s, 2s
-        await new Promise(resolve => setTimeout(resolve, 1000 * retry));
+        // Backoff exponentiel pour rate limiting : 2s, 4s, 8s
+        const backoffMs = RATE_LIMIT_BACKOFF_MS * Math.pow(2, retry - 1);
+        console.log(`[Import] Retry ${retry}/${MAX_RETRIES} pour chunk ${chunkIndex + 1}, attente ${backoffMs}ms`);
+        await new Promise(resolve => setTimeout(resolve, backoffMs));
       }
 
       try {
@@ -141,7 +150,7 @@ export function useChunkedImport(config: ChunkedImportConfig): ChunkedImportActi
             workspaceId,
             tableId: importConfig.tableId,
             tableName: importConfig.tableName,
-            importMode: 'append', // Toujours append pour les données restantes
+            importMode: 'append',
             csvData,
             fileName: importConfig.file?.name,
             totalRows: chunk.length,
@@ -157,6 +166,18 @@ export function useChunkedImport(config: ChunkedImportConfig): ChunkedImportActi
         }
 
         lastError = result.error || 'Erreur inconnue';
+        
+     // Vérifier si c'est une erreur de rate limiting
+        const isRateLimited = result.code === 6045 || 
+                             lastError?.includes('EXCEEDING') ||
+                             lastError?.includes('rate') ||
+                             lastError?.includes('limites');
+                             
+        if (isRateLimited && retry < MAX_RETRIES) {
+          console.warn(`[Import] Rate limit détecté sur chunk ${chunkIndex + 1}, retry avec backoff...`);
+          continue; // Retry avec backoff
+        }
+
         console.warn(`[Import] Chunk ${chunkIndex + 1} erreur:`, lastError);
       } catch (error) {
         lastError = error instanceof Error ? error.message : 'Erreur réseau';
@@ -324,6 +345,11 @@ export function useChunkedImport(config: ChunkedImportConfig): ChunkedImportActi
             total: totalChunks,
           },
         });
+
+        // Délai entre chunks pour éviter rate limiting (sauf dernier chunk)
+        if (chunkIndex < totalChunks - 1) {
+          await new Promise(resolve => setTimeout(resolve, CHUNK_DELAY_MS));
+        }
       }
 
       // ==================== FIN CHUNKING ====================
